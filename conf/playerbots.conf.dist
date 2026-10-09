@@ -789,6 +789,19 @@ Playerbots.LimitTalentsExpansion = 0
 # Default: 1 (enabled)
 Playerbots.EnableRandomBotTrading = 1
 
+# Randombots offer their crafts to players (agent-wow #87). A bot standing in a capital posts
+# "LFW <Profession>: [recipe] [recipe] [recipe]" in Trade - City, built from recipes it knows.
+# Default: 0 (disabled)
+Playerbots.RandomBotCraftService = 0
+
+# Minutes between one bot's LFW lines
+# Default: 20
+Playerbots.RandomBotCraftAdvertMinutes = 20
+
+# Seconds between any two LFW lines of one faction
+# Default: 60
+Playerbots.RandomBotCraftAdvertGap = 60
+
 # Configure message prefixes which will be excluded in analysis in trade action to open trade window
 Playerbots.TradeActionExcludedPrefixes = "RPLL_H_,DBMv4,{звезда} Questie,{rt1} Questie"
 

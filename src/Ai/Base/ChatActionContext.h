@@ -17,6 +17,7 @@
 #include "ChangeStrategyAction.h"
 #include "ChangeTalentsAction.h"
 #include "ChatShortcutActions.h"
+#include "CraftServiceAction.h"
 #include "CheatAction.h"
 #include "ChooseTargetActions.h"
 #include "CustomStrategyEditAction.h"
@@ -186,6 +187,7 @@ public:
         creators["cdebug"] = &ChatActionContext::debug;
         creators["cs"] = &ChatActionContext::cs;
         creators["wts"] = &ChatActionContext::wts;
+        creators["suggest craft"] = &ChatActionContext::suggest_craft;
         creators["hire"] = &ChatActionContext::hire;
         creators["craft"] = &ChatActionContext::craft;
         creators["flag"] = &ChatActionContext::flag;
@@ -223,6 +225,7 @@ private:
     static Action* craft(PlayerbotAI* botAI) { return new SetCraftAction(botAI); }
     static Action* hire(PlayerbotAI* botAI) { return new HireAction(botAI); }
     static Action* wts(PlayerbotAI* botAI) { return new WtsAction(botAI); }
+    static Action* suggest_craft(PlayerbotAI* botAI) { return new SuggestCraftAction(botAI); }
     static Action* cs(PlayerbotAI* botAI) { return new CustomStrategyEditAction(botAI); }
     static Action* debug(PlayerbotAI* botAI) { return new DebugAction(botAI); }
     static Action* mail(PlayerbotAI* botAI) { return new MailAction(botAI); }
