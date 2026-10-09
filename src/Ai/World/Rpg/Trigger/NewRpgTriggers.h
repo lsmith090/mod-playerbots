@@ -43,6 +43,26 @@ public:
     bool IsActive() override;
 };
 
+// A random bot standing still in a city or an inn, out of combat, may craft for skill (#87)
+class CraftForSkillTrigger : public Trigger
+{
+public:
+    CraftForSkillTrigger(PlayerbotAI* botAI) : Trigger(botAI, "can craft for skill", 5) {}
+    bool IsActive() override;
+};
+
+// A random bot stands at the vendor its WANDER_NPC visit chose: active once per visit (#87)
+class AtVendorTrigger : public Trigger
+{
+public:
+    AtVendorTrigger(PlayerbotAI* botAI) : Trigger(botAI, "at vendor for trade") {}
+    bool IsActive() override;
+
+private:
+    ObjectGuid lastVendor;
+    uint32 lastVisitStart{0};
+};
+
 // A random bot stands at the profession trainer its WANDER_NPC visit chose: active once per visit (#87)
 class AtTrainerTrigger : public Trigger
 {

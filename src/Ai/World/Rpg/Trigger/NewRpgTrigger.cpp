@@ -77,3 +77,41 @@ bool AtTrainerTrigger::IsActive()
     lastVisitStart = botAI->rpgInfo.startT;
     return true;
 }
+
+bool CraftForSkillTrigger::IsActive()
+{
+    switch (botAI->rpgInfo.GetStatus())
+    {
+        case RPG_IDLE:
+        case RPG_WANDER_RANDOM:
+        case RPG_WANDER_NPC:
+        case RPG_REST:
+            break;
+        default:
+            return false;
+    }
+
+    time_t const now = time(nullptr);
+    return bot->HasPlayerFlag(PLAYER_FLAGS_RESTING) && !bot->IsInCombat() && !bot->isMoving() &&
+           !bot->IsNonMeleeSpellCast(false) && EarnedProfessions::CraftEnabled(botAI) &&
+           AI_VALUE2(time_t, "last said", EarnedProfessions::NEXT_CRAFT_SEARCH) <= now &&
+           AI_VALUE2(time_t, "last said", EarnedProfessions::CRAFT_ORDER_HOLD) <= now;
+}
+
+bool AtVendorTrigger::IsActive()
+{
+    auto* visit = std::get_if<NewRpgInfo::WanderNpc>(&botAI->rpgInfo.data);
+    if (!visit || !visit->npcOrGo)
+        return false;
+
+    // one try per visit, bought or not
+    if (visit->npcOrGo == lastVendor && botAI->rpgInfo.startT == lastVisitStart)
+        return false;
+
+    if (!EarnedProfessions::CraftEnabled(botAI) || !bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_VENDOR))
+        return false;
+
+    lastVendor = visit->npcOrGo;
+    lastVisitStart = botAI->rpgInfo.startT;
+    return true;
+}

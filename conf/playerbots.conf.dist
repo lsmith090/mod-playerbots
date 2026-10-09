@@ -1448,6 +1448,13 @@ Playerbots.RandomBotAuctionPriceMultiplier = 1.0
 # Default: 0 (disabled)
 Playerbots.RandomBotEarnedProfessions = 0
 
+# Randombots raise trade skill by crafting (#87): standing in a city or an inn between tasks, a bot crafts a known
+# recipe that still gives a point, if it carries the reagents and stands by the focus (anvil, forge, fire); at a
+# vendor its RPG wander reaches, it buys the reagents those recipes need (up to a stack each) from the money it
+# keeps for trade skills. Best with RandomBotEarnedProfessions.
+# Default: 0 (disabled)
+Playerbots.RandomBotCraftForSkill = 0
+
 # Control probability weights for RPG status of bots. Takes effect only when the status meets its premise.​
 # Sum of weights need not be 100. Set to 0 to disable the status.
 #

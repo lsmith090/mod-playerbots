@@ -76,6 +76,22 @@ void NewRpgStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
     );
     triggers.push_back(
         new TriggerNode(
+            "at vendor for trade",
+            {
+                NextAction("buy for trade", 4.0f)
+            }
+        )
+    );
+    triggers.push_back(
+        new TriggerNode(
+            "can craft for skill",
+            {
+                NextAction("craft for skill", 3.5f)
+            }
+        )
+    );
+    triggers.push_back(
+        new TriggerNode(
             "do quest status",
             {
                 NextAction("new rpg do quest", 3.0f)

@@ -21,6 +21,13 @@ bool Enabled(PlayerbotAI* botAI);
 bool AtCap(Player* bot);
 // "last said" holds the next time the bot looks for a trainer (no new header for a timestamp)
 inline constexpr char const* NEXT_TRAINER_SEARCH = "earned next trainer search";
+
+// Playerbots.RandomBotCraftForSkill is on, and the bot is a random bot without a master
+bool CraftEnabled(PlayerbotAI* botAI);
+// "last said" holds the next time the bot looks for something to craft
+inline constexpr char const* NEXT_CRAFT_SEARCH = "earned next craft search";
+// "last said" holds until when a customer's mats sit in the bot's bags (#87 piece 8 sets it): no crafting till then
+inline constexpr char const* CRAFT_ORDER_HOLD = "craft order hold";
 }  // namespace EarnedProfessions
 
 // A random bot whose trade skill sits at its cap walks to the nearest friendly trainer on its map that teaches the
@@ -38,6 +45,26 @@ class RpgProfessionTrainAction : public Action
 {
 public:
     RpgProfessionTrainAction(PlayerbotAI* botAI) : Action(botAI, "rpg profession train") {}
+
+    bool Execute(Event event) override;
+};
+
+// A random bot standing in a city or an inn crafts a known recipe that still raises its skill, with reagents and tools
+// it carries and the focus (anvil, forge, fire) beside it.
+class CraftForSkillAction : public Action
+{
+public:
+    CraftForSkillAction(PlayerbotAI* botAI) : Action(botAI, "craft for skill") {}
+
+    bool Execute(Event event) override;
+};
+
+// A random bot at the vendor its WANDER_NPC visit chose buys the reagents its skill-up recipes need (item usage
+// "skill": thread, vials, flux), up to a stack each, from its "free money for" tradeskill.
+class BuyForTradeAction : public Action
+{
+public:
+    BuyForTradeAction(PlayerbotAI* botAI) : Action(botAI, "buy for trade") {}
 
     bool Execute(Event event) override;
 };

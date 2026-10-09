@@ -6,9 +6,12 @@
 
 #include "NewRpgProfessionAction.h"
 
+#include <algorithm>
+
 #include "BudgetValues.h"
 #include "Config.h"
 #include "Event.h"
+#include "ItemUsageValue.h"
 #include "NewRpgInfo.h"
 #include "ObjectMgr.h"
 #include "PlayerbotFactory.h"
@@ -99,6 +102,12 @@ bool Enabled(PlayerbotAI* botAI)
            sRandomPlayerbotMgr.IsRandomBot(botAI->GetBot()) && !botAI->GetMaster();
 }
 
+bool CraftEnabled(PlayerbotAI* botAI)
+{
+    return sConfigMgr->GetOption<bool>("Playerbots.RandomBotCraftForSkill", false) &&
+           sRandomPlayerbotMgr.IsRandomBot(botAI->GetBot()) && !botAI->GetMaster();
+}
+
 bool AtCap(Player* bot)
 {
     for (uint16 skillId : TRADE_SKILLS)
@@ -185,4 +194,102 @@ bool RpgProfessionTrainAction::Execute(Event /*event*/)
     LOG_INFO("playerbots", "[earned] {} trains at {} ({}): {}; skills{}", bot->GetName(), trainer->GetName(),
              trainer->GetEntry(), trained ? "bought what it could afford" : "nothing to learn", skills.str());
     return trained;
+}
+
+bool CraftForSkillAction::Execute(Event /*event*/)
+{
+    std::vector<uint32> crafts;
+    for (auto const& [spellId, playerSpell] : bot->GetSpellMap())
+    {
+        if (playerSpell->State == PLAYERSPELL_REMOVED || !playerSpell->Active)
+            continue;
+
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId);
+        if (!spellInfo || !spellInfo->HasEffect(SPELL_EFFECT_CREATE_ITEM))
+            continue;
+
+        // a recipe of a trade skill below its max that still gives a point (not grey)
+        bool raisesSkill = false;
+        SkillLineAbilityMapBounds bounds = sSpellMgr->GetSkillLineAbilityMapBounds(spellId);
+        for (auto itr = bounds.first; itr != bounds.second && !raisesSkill; ++itr)
+        {
+            uint16 const skillId = itr->second->SkillLine;
+            bool const tradeSkill =
+                std::find(std::begin(TRADE_SKILLS), std::end(TRADE_SKILLS), skillId) != std::end(TRADE_SKILLS);
+            raisesSkill = tradeSkill && bot->GetPureSkillValue(skillId) < bot->GetPureMaxSkillValue(skillId);
+        }
+        if (!raisesSkill || !ItemUsageValue::SpellGivesSkillUp(spellId, bot))
+            continue;
+
+        // CanCastSpell ignores reagents (TRIGGERED_IGNORE_POWER_AND_REAGENT_COST), so count them here
+        bool hasReagents = true;
+        for (uint8 i = 0; i < MAX_SPELL_REAGENTS && hasReagents; ++i)
+            if (spellInfo->Reagent[i] > 0 && spellInfo->ReagentCount[i])
+                hasReagents = bot->HasItemCount(spellInfo->Reagent[i], spellInfo->ReagentCount[i]);
+
+        // tools, the spell focus, the cooldown
+        if (hasReagents && botAI->CanCastSpell(spellId, bot, true))
+            crafts.push_back(spellId);
+    }
+
+    auto nextSearch = context->GetValue<time_t>("last said", EarnedProfessions::NEXT_CRAFT_SEARCH);
+    if (crafts.empty())
+    {
+        nextSearch->Set(time(nullptr) + 5 * MINUTE);
+        return false;
+    }
+
+    uint32 const spellId = crafts[urand(0, crafts.size() - 1)];
+    LOG_DEBUG("playerbots", "[earned] {} crafts {} for skill", bot->GetName(), spellId);
+    if (botAI->CastSpell(spellId, bot))
+        return true;
+
+    // the cast itself failed (a missing tool, say): try again later, not every tick
+    nextSearch->Set(time(nullptr) + MINUTE);
+    return false;
+}
+
+bool BuyForTradeAction::Execute(Event /*event*/)
+{
+    auto const* visit = std::get_if<NewRpgInfo::WanderNpc>(&botAI->rpgInfo.data);
+    if (!visit)
+        return false;
+
+    Creature* vendor = bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_VENDOR);
+    VendorItemData const* vendorItems = vendor ? vendor->GetVendorItems() : nullptr;
+    if (!vendorItems)
+        return false;
+
+    float const discount = bot->GetReputationPriceDiscount(vendor);
+    uint32 bought = 0;
+    for (uint32 slot = 0; slot < vendorItems->GetItemCount(); ++slot)
+    {
+        VendorItem const* vendorItem = vendorItems->GetItem(slot);
+        ItemTemplate const* proto = vendorItem ? sObjectMgr->GetItemTemplate(vendorItem->item) : nullptr;
+        if (!proto || vendorItem->ExtendedCost || proto->Class == ITEM_CLASS_RECIPE)
+            continue;
+
+        // "skill": a reagent of a known recipe that gives skill, with less than a stack in the bags
+        if (AI_VALUE2(ItemUsage, "item usage", proto->ItemId) != ITEM_USAGE_SKILL)
+            continue;
+
+        uint32 const price = uint32(floor(proto->BuyPrice * discount));
+        uint32 const stack = proto->GetMaxStackSize();
+        for (uint32 i = 0; i < 20 && bot->GetItemCount(proto->ItemId) < stack; ++i)
+        {
+            if (AI_VALUE2(uint32, "free money for", uint32(NeedMoneyFor::tradeskill)) < price)
+                break;
+
+            uint32 const before = bot->GetItemCount(proto->ItemId);
+            bot->BuyItemFromVendorSlot(vendor->GetGUID(), slot, proto->ItemId, 1, NULL_BAG, NULL_SLOT);
+            if (bot->GetItemCount(proto->ItemId) <= before)
+                break;
+            ++bought;
+        }
+    }
+
+    if (bought)
+        LOG_INFO("playerbots", "[earned] {} buys {} lots of reagents at {} ({})", bot->GetName(), bought,
+                 vendor->GetName(), vendor->GetEntry());
+    return bought > 0;
 }

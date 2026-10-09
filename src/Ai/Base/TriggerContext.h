@@ -243,6 +243,8 @@ public:
         creators["at auctioneer"] = &TriggerContext::at_auctioneer;
         creators["profession training due"] = &TriggerContext::profession_training_due;
         creators["at trainer"] = &TriggerContext::at_trainer;
+        creators["at vendor for trade"] = &TriggerContext::at_vendor_for_trade;
+        creators["can craft for skill"] = &TriggerContext::can_craft_for_skill;
         creators["do quest status"] = &TriggerContext::do_quest_status;
         creators["travel flight status"] = &TriggerContext::travel_flight_status;
         creators["outdoor pvp status"] = &TriggerContext::outdoor_pvp_status;
@@ -459,6 +461,8 @@ private:
     static Trigger* at_auctioneer(PlayerbotAI* botAI) { return new AtAuctioneerTrigger(botAI); }
     static Trigger* profession_training_due(PlayerbotAI* botAI) { return new ProfessionTrainingDueTrigger(botAI); }
     static Trigger* at_trainer(PlayerbotAI* botAI) { return new AtTrainerTrigger(botAI); }
+    static Trigger* at_vendor_for_trade(PlayerbotAI* botAI) { return new AtVendorTrigger(botAI); }
+    static Trigger* can_craft_for_skill(PlayerbotAI* botAI) { return new CraftForSkillTrigger(botAI); }
     static Trigger* do_quest_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_DO_QUEST); }
     static Trigger* travel_flight_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_TRAVEL_FLIGHT); }
     static Trigger* outdoor_pvp_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_OUTDOOR_PVP); }
