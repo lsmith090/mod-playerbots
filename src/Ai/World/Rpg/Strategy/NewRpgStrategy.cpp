@@ -52,6 +52,14 @@ void NewRpgStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
     );
     triggers.push_back(
         new TriggerNode(
+            "at auctioneer",
+            {
+                NextAction("ah sell", 4.0f)
+            }
+        )
+    );
+    triggers.push_back(
+        new TriggerNode(
             "do quest status",
             {
                 NextAction("new rpg do quest", 3.0f)

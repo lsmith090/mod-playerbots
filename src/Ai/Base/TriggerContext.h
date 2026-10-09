@@ -240,6 +240,7 @@ public:
         creators["go camp status"] = &TriggerContext::go_camp_status;
         creators["wander random status"] = &TriggerContext::wander_random_status;
         creators["wander npc status"] = &TriggerContext::wander_npc_status;
+        creators["at auctioneer"] = &TriggerContext::at_auctioneer;
         creators["do quest status"] = &TriggerContext::do_quest_status;
         creators["travel flight status"] = &TriggerContext::travel_flight_status;
         creators["outdoor pvp status"] = &TriggerContext::outdoor_pvp_status;
@@ -453,6 +454,7 @@ private:
     static Trigger* go_camp_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_GO_CAMP); }
     static Trigger* wander_random_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_WANDER_RANDOM); }
     static Trigger* wander_npc_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_WANDER_NPC); }
+    static Trigger* at_auctioneer(PlayerbotAI* botAI) { return new AtAuctioneerTrigger(botAI); }
     static Trigger* do_quest_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_DO_QUEST); }
     static Trigger* travel_flight_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_TRAVEL_FLIGHT); }
     static Trigger* outdoor_pvp_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_OUTDOOR_PVP); }

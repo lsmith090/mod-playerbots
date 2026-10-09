@@ -23,4 +23,16 @@ protected:
     NewRpgStatus status;
 };
 
+// A random bot stands at the auctioneer its WANDER_NPC visit chose: active once per visit
+class AtAuctioneerTrigger : public Trigger
+{
+public:
+    AtAuctioneerTrigger(PlayerbotAI* botAI) : Trigger(botAI, "at auctioneer") {}
+    bool IsActive() override;
+
+private:
+    ObjectGuid lastAuctioneer;
+    uint32 lastVisitStart{0};
+};
+
 #endif

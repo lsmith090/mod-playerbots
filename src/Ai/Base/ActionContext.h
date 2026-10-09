@@ -43,6 +43,7 @@
 #include "MoveToRpgTargetAction.h"
 #include "MoveToTravelTargetAction.h"
 #include "MovementActions.h"
+#include "AuctionSellAction.h"
 #include "NewRpgAction.h"
 #include "NewRpgDoGather.h"
 #include "NewRpgOutdoorPvP.h"
@@ -274,6 +275,7 @@ public:
         creators["new rpg go camp"] = &ActionContext::new_rpg_go_camp;
         creators["new rpg wander random"] = &ActionContext::new_rpg_wander_random;
         creators["new rpg wander npc"] = &ActionContext::new_rpg_wander_npc;
+        creators["ah sell"] = &ActionContext::ah_sell;
         creators["new rpg do quest"] = &ActionContext::new_rpg_do_quest;
         creators["new rpg travel flight"] = &ActionContext::new_rpg_travel_flight;
         creators["new rpg outdoor pvp"] = &ActionContext::new_rpg_outdoor_pvp;
@@ -479,6 +481,7 @@ private:
     static Action* new_rpg_go_camp(PlayerbotAI* botAI) { return new NewRpgGoCampAction(botAI); }
     static Action* new_rpg_wander_random(PlayerbotAI* botAI) { return new NewRpgWanderRandomAction(botAI); }
     static Action* new_rpg_wander_npc(PlayerbotAI* botAI) { return new NewRpgWanderNpcAction(botAI); }
+    static Action* ah_sell(PlayerbotAI* botAI) { return new AuctionSellAction(botAI); }
     static Action* new_rpg_do_quest(PlayerbotAI* botAI) { return new NewRpgDoQuestAction(botAI); }
     static Action* new_rpg_travel_flight(PlayerbotAI* botAI) { return new NewRpgTravelFlightAction(botAI); }
     static Action* new_rpg_outdoor_pvp(PlayerbotAI* botAI) { return new NewRpgOutdoorPvpAction(botAI); }

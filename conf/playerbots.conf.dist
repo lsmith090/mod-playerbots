@@ -1424,6 +1424,21 @@ Playerbots.RestrictedHealerDPSMaps = "33,34,36,43,47,48,70,90,109,129,209,229,23
 # Default: 1 (enabled)
 Playerbots.EnableNewRpgStrategy = 1
 
+# Randombots list items on the auction house when their RPG wander takes them to an auctioneer.
+# Only unbound items the bot has no use for (item usage "Auctionhouse") are listed, for 12 hours,
+# and only when the opening bid beats what a vendor pays. Needs EnableNewRpgStrategy.
+# Default: 0 (disabled)
+Playerbots.RandomBotAuctionSell = 0
+
+# Most items (stacks) one auctioneer visit lists
+# Default: 3
+Playerbots.RandomBotAuctionSellMax = 3
+
+# Buyout = the item's vendor BuyPrice (or 4x SellPrice) x stack x this, spread +-15%;
+# the opening bid is 60-80% of the buyout
+# Default: 1.0
+Playerbots.RandomBotAuctionPriceMultiplier = 1.0
+
 # Control probability weights for RPG status of bots. Takes effect only when the status meets its premise.​
 # Sum of weights need not be 100. Set to 0 to disable the status.
 #
