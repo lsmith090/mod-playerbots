@@ -35,4 +35,24 @@ private:
     uint32 lastVisitStart{0};
 };
 
+// A random bot with a trade skill at its cap, between quests, is due to look for its trainer (#87)
+class ProfessionTrainingDueTrigger : public Trigger
+{
+public:
+    ProfessionTrainingDueTrigger(PlayerbotAI* botAI) : Trigger(botAI, "profession training due", 10) {}
+    bool IsActive() override;
+};
+
+// A random bot stands at the profession trainer its WANDER_NPC visit chose: active once per visit (#87)
+class AtTrainerTrigger : public Trigger
+{
+public:
+    AtTrainerTrigger(PlayerbotAI* botAI) : Trigger(botAI, "at trainer") {}
+    bool IsActive() override;
+
+private:
+    ObjectGuid lastTrainer;
+    uint32 lastVisitStart{0};
+};
+
 #endif

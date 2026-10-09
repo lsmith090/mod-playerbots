@@ -6,8 +6,12 @@
 
 #include "NewRpgTriggers.h"
 #include "Config.h"
+#include "NewRpgProfessionAction.h"
+#include "ObjectMgr.h"
 #include "PlayerbotAI.h"
+#include "Playerbots.h"
 #include "RandomPlayerbotMgr.h"
+#include "Trainer.h"
 
 bool NewRpgStatusTrigger::IsActive() { return status == botAI->rpgInfo.GetStatus(); }
 
@@ -28,6 +32,48 @@ bool AtAuctioneerTrigger::IsActive()
         return false;
 
     lastAuctioneer = visit->npcOrGo;
+    lastVisitStart = botAI->rpgInfo.startT;
+    return true;
+}
+
+bool ProfessionTrainingDueTrigger::IsActive()
+{
+    // not while questing, flying or already walking somewhere chosen
+    switch (botAI->rpgInfo.GetStatus())
+    {
+        case RPG_IDLE:
+        case RPG_WANDER_RANDOM:
+        case RPG_WANDER_NPC:
+        case RPG_GO_GRIND:
+        case RPG_REST:
+            break;
+        default:
+            return false;
+    }
+
+    return !bot->IsInCombat() && EarnedProfessions::Enabled(botAI) && EarnedProfessions::AtCap(bot) &&
+           AI_VALUE2(time_t, "last said", EarnedProfessions::NEXT_TRAINER_SEARCH) <= time(nullptr);
+}
+
+bool AtTrainerTrigger::IsActive()
+{
+    auto* visit = std::get_if<NewRpgInfo::WanderNpc>(&botAI->rpgInfo.data);
+    if (!visit || !visit->npcOrGo)
+        return false;
+
+    // one try per visit, trained or not
+    if (visit->npcOrGo == lastTrainer && botAI->rpgInfo.startT == lastVisitStart)
+        return false;
+
+    if (!EarnedProfessions::Enabled(botAI))
+        return false;
+
+    Creature* creature = bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_TRAINER);
+    Trainer::Trainer const* trainer = creature ? sObjectMgr->GetTrainer(creature->GetEntry()) : nullptr;
+    if (!trainer || trainer->GetTrainerType() != Trainer::Type::Tradeskill)
+        return false;
+
+    lastTrainer = visit->npcOrGo;
     lastVisitStart = botAI->rpgInfo.startT;
     return true;
 }
