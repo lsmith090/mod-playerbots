@@ -5,6 +5,8 @@
  */
 
 #include "RandomPlayerbotFactory.h"
+
+#include <set>
 #include "PlayerbotsDatabase.h"
 #include "AccountMgr.h"
 #include "ArenaTeamMgr.h"
@@ -82,21 +84,28 @@ Player* RandomPlayerbotFactory::CreateRandomBot(WorldSession* session, uint8 cls
 
     const bool alliance = static_cast<bool>(urand(0, 1));
 
-    std::vector<uint8> raceOptions;
-    for (uint8 race = RACE_HUMAN; race < sRaceMgr->GetMaxRaces(); ++race)
+    auto raceOptionsFor = [&](bool side)
     {
-        // skip disabled with config races
-        if ((1 << (race - 1)) & sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED_RACEMASK))
-            continue;
-
-        // Try to get 50/50 faction distribution for random bot population balance.
-        // Without this check, races from the faction with more class options would dominate.
-        if (alliance == IsAlliance(race))
+        std::vector<uint8> options;
+        for (uint8 race = RACE_HUMAN; race < sRaceMgr->GetMaxRaces(); ++race)
         {
-            if (IsValidRaceClassCombination(race, cls, sWorld->getIntConfig(CONFIG_EXPANSION)))
-                raceOptions.push_back(race);
+            // skip disabled with config races
+            if ((1 << (race - 1)) & sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED_RACEMASK))
+                continue;
+
+            // Try to get 50/50 faction distribution for random bot population balance.
+            // Without this check, races from the faction with more class options would dominate.
+            if (side == IsAlliance(race) && IsValidRaceClassCombination(race, cls, sWorld->getIntConfig(CONFIG_EXPANSION)))
+                options.push_back(race);
         }
-    }
+        return options;
+    };
+
+    // Local patch (agent-wow, 2026-10-09): a class only one side can play (a vanilla realm's paladin or shaman) takes
+    // that side instead of failing the slot on the coin flip.
+    std::vector<uint8> raceOptions = raceOptionsFor(alliance);
+    if (raceOptions.empty())
+        raceOptions = raceOptionsFor(!alliance);
 
     if (raceOptions.empty())
     {
@@ -734,7 +743,18 @@ void RandomPlayerbotFactory::CreateRandomBots()
                                                 time_t(0), LOCALE_enUS, 0, false, false, 0);
         sessionBots.push_back(session);
 
-        for (uint8 cls = CLASS_WARRIOR; cls < MAX_CLASSES - count; ++cls)
+        // Local patch (agent-wow, 2026-10-09): top an account up with the classes it lacks, not the lowest class ids
+        // (an account short of n got n warriors-first, which skews the pool), and skip a class no allowed race can
+        // play (a death knight on a vanilla realm) instead of failing it at every boot.
+        std::set<uint8> classesHeld;
+        if (QueryResult held = CharacterDatabase.Query("SELECT class FROM characters WHERE account = {}", accountId))
+        {
+            do
+                classesHeld.insert(held->Fetch()[0].Get<uint8>());
+            while (held->NextRow());
+        }
+
+        for (uint8 cls = CLASS_WARRIOR; cls < MAX_CLASSES && count < 10; ++cls)
         {
             // skip nonexistent classes
             if (!((1 << (cls - 1)) & CLASSMASK_ALL_PLAYABLE) || !sChrClassesStore.LookupEntry(cls))
@@ -742,6 +762,16 @@ void RandomPlayerbotFactory::CreateRandomBots()
 
             // skip disabled with config classes
             if ((1 << (cls - 1)) & sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED_CLASSMASK))
+                continue;
+
+            if (classesHeld.count(cls))
+                continue;
+
+            bool playable = false;
+            for (uint8 race = RACE_HUMAN; race < sRaceMgr->GetMaxRaces() && !playable; ++race)
+                playable = !((1 << (race - 1)) & sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED_RACEMASK)) &&
+                           factory.IsValidRaceClassCombination(race, cls, sWorld->getIntConfig(CONFIG_EXPANSION));
+            if (!playable)
                 continue;
 
             Player* playerBot = factory.CreateRandomBot(session, cls, nameCache);
@@ -758,6 +788,8 @@ void RandomPlayerbotFactory::CreateRandomBots()
             playerBot->CleanupsBeforeDelete();
             delete playerBot;
             bot_creation++;
+            ++count;
+            classesHeld.insert(cls);
         }
     }
 
