@@ -1439,6 +1439,15 @@ Playerbots.RandomBotAuctionSellMax = 3
 # Default: 1.0
 Playerbots.RandomBotAuctionPriceMultiplier = 1.0
 
+# Randombots earn their professions like a player (#87): no free trade skill (level x 5) and no free trade
+# recipes on randomize, refresh, level-up or "maintenance". They keep the profession roll and its Apprentice
+# spell (1/75); ranks and recipes come from the trainer, paid. Trade skills and recipes survive a full
+# randomize. Existing bots' skill max drops to the cap of the highest rank they know at their next refresh
+# (25/25 becomes 25/75). Class spells stay automatic. Pair it with Playerbots.MaintenanceCommand = 0: a player
+# who invites a random bot becomes its master, and the "maintenance" whisper hands out gear and supplies.
+# Default: 0 (disabled)
+Playerbots.RandomBotEarnedProfessions = 0
+
 # Control probability weights for RPG status of bots. Takes effect only when the status meets its premise.​
 # Sum of weights need not be 100. Set to 0 to disable the status.
 #

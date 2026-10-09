@@ -9,6 +9,7 @@
 #include "AccountMgr.h"
 #include "AiFactory.h"
 #include "AiObjectContext.h"
+#include "Config.h"
 #include "ArenaTeam.h"
 #include "ArenaTeamMgr.h"
 #include "DBCStores.h"
@@ -108,6 +109,14 @@ std::vector<uint32> PlayerbotFactory::ccBreakTrinketCache;
 
 namespace
 {
+// agent-wow (#87): a random bot earns its professions at the trainer, by crafting and gathering, instead of
+// being handed skill and recipes. Read here, not in PlayerbotAIConfig.h, so the module's hot headers stay alone.
+bool EarnsProfessions(Player* bot)
+{
+    return sConfigMgr->GetOption<bool>("Playerbots.RandomBotEarnedProfessions", false) &&
+           sRandomPlayerbotMgr.IsRandomBot(bot);
+}
+
 constexpr uint32 SPELL_DRUID_THICK_HIDE = 16931;
 constexpr uint32 SPELL_OWLKIN_FRENZY = 48393;
 constexpr uint32 SPELL_PRIMAL_TENACITY = 33957;
@@ -1629,12 +1638,22 @@ void PlayerbotFactory::InitPet()
 
 void PlayerbotFactory::ClearSkills()
 {
-    for (uint32 i = 0; i < sizeof(tradeSkills) / sizeof(uint32); ++i)
+    // an earned profession survives a full randomize, wherever its skill slot is
+    bool const keepTradeSkills = EarnsProfessions(bot);
+    auto keepSlot = [this, keepTradeSkills](uint8 slot)
+    {
+        uint16 const skillId = PAIR32_LOPART(bot->GetUInt32Value(PLAYER_SKILL_INDEX(slot)));
+        return keepTradeSkills && (IsPrimaryTradeSkill(skillId) || IsSecondaryTradeSkill(skillId));
+    };
+
+    for (uint32 i = 0; i < sizeof(tradeSkills) / sizeof(uint32) && !keepTradeSkills; ++i)
     {
         bot->SetSkill(tradeSkills[i], 0, 0, 0);
     }
-    bot->SetUInt32Value(PLAYER_SKILL_INDEX(0), 0);
-    bot->SetUInt32Value(PLAYER_SKILL_INDEX(1), 0);
+    if (!keepSlot(0))
+        bot->SetUInt32Value(PLAYER_SKILL_INDEX(0), 0);
+    if (!keepSlot(1))
+        bot->SetUInt32Value(PLAYER_SKILL_INDEX(1), 0);
 
     // unlearn default race/class skills
     if (PlayerInfo const* info = sObjectMgr->GetPlayerInfo(bot->getRace(), bot->getClass()))
@@ -1665,6 +1684,22 @@ void PlayerbotFactory::ClearEverything()
 
 void PlayerbotFactory::ClearSpells()
 {
+    // an earned profession keeps its ranks and recipes through a full randomize
+    bool const keepTradeSpells = EarnsProfessions(bot);
+    auto isTradeSpell = [](uint32 spellId)
+    {
+        if (SpellLearnSkillNode const* learnSkill = sSpellMgr->GetSpellLearnSkill(spellId))
+            if (IsPrimaryTradeSkill(learnSkill->skill) || IsSecondaryTradeSkill(learnSkill->skill))
+                return true;
+
+        SkillLineAbilityMapBounds bounds = sSpellMgr->GetSkillLineAbilityMapBounds(spellId);
+        for (auto itr = bounds.first; itr != bounds.second; ++itr)
+            if (IsPrimaryTradeSkill(itr->second->SkillLine) || IsSecondaryTradeSkill(itr->second->SkillLine))
+                return true;
+
+        return false;
+    };
+
     std::list<uint32> spells;
     for (PlayerSpellMap::iterator itr = bot->GetSpellMap().begin(); itr != bot->GetSpellMap().end(); ++itr)
     {
@@ -1674,6 +1709,9 @@ void PlayerbotFactory::ClearSpells()
         {
             continue;
         }
+
+        if (keepTradeSpells && isTradeSpell(spellId))
+            continue;
 
         spells.push_back(spellId);
     }
@@ -3104,9 +3142,14 @@ void PlayerbotFactory::InitTradeSkills()
             bot->SetSkill(skillId, 0, 0, 0);
     }
 
-    SetRandomSkill(SKILL_FIRST_AID);
-    SetRandomSkill(SKILL_FISHING);
-    SetRandomSkill(SKILL_COOKING);
+    // an earned skill is never set by the factory: the starter spell gives 1/75, the rest is trained and crafted
+    bool const earned = EarnsProfessions(bot);
+    if (!earned)
+    {
+        SetRandomSkill(SKILL_FIRST_AID);
+        SetRandomSkill(SKILL_FISHING);
+        SetRandomSkill(SKILL_COOKING);
+    }
 
     std::vector<uint16> skillsToLearn = {SKILL_FIRST_AID, SKILL_FISHING, SKILL_COOKING};
     skillsToLearn.insert(skillsToLearn.end(), primarySkills.begin(), primarySkills.end());
@@ -3136,15 +3179,51 @@ void PlayerbotFactory::InitTradeSkills()
         bot->learnSpell(spellId, false);
     }
 
-    for (uint16 skillId : primarySkills)
-        SetRandomSkill(skillId);
+    if (!earned)
+    {
+        for (uint16 skillId : primarySkills)
+            SetRandomSkill(skillId);
+    }
+    else
+    {
+        // The max of an earned skill is the cap of the highest rank the bot knows (Apprentice 75, Journeyman 150,
+        // Expert 225, Artisan 300). This undoes the old level x 5 handout once: 25/25 at level 5 becomes 25/75.
+        // The value is kept, clamped to the cap.
+        for (uint16 skillId : skillsToLearn)
+        {
+            if (!bot->HasSkill(skillId))
+                continue;
+
+            uint16 cap = 0;
+            for (auto const& [spellId, playerSpell] : bot->GetSpellMap())
+            {
+                if (playerSpell->State == PLAYERSPELL_REMOVED)
+                    continue;
+                SpellLearnSkillNode const* learnSkill = sSpellMgr->GetSpellLearnSkill(spellId);
+                if (learnSkill && learnSkill->skill == skillId)
+                    cap = std::max(cap, learnSkill->maxvalue);
+            }
+
+            uint16 const max = bot->GetPureMaxSkillValue(skillId);
+            if (!cap || cap == max)
+                continue;
+
+            uint16 const value = bot->GetPureSkillValue(skillId);
+            uint16 const newValue = std::min(value, cap);
+            bot->SetSkill(skillId, cap / 75, newValue, cap);
+            LOG_INFO("playerbots", "[earned] {} skill {} {}/{} -> {}/{}", bot->GetName(), skillId, value, max,
+                     newValue, cap);
+        }
+    }
 
     bot->SetFreePrimaryProfessions(
         static_cast<uint16>(maxPrimaryTradeSkills > primarySkills.size()
                                 ? maxPrimaryTradeSkills - primarySkills.size()
                                 : 0));
 
-    InitTradeSpecializations();
+    // a specialization is a quest for a player, not a gift at a skill value
+    if (!earned)
+        InitTradeSpecializations();
 }
 
 void PlayerbotFactory::InitTradeSpecializations()
@@ -3527,9 +3606,14 @@ void PlayerbotFactory::InitAvailableSpells()
             trainerIdCache[bot->getClass()].push_back(i->first);
         }
     }
+    // class spells stay automatic; an earned profession's ranks and recipes are bought at its trainer (TrainerAction)
+    bool const earned = EarnsProfessions(bot);
     for (uint32 trainerId : trainerIdCache[bot->getClass()])
     {
         Trainer::Trainer* trainer = sObjectMgr->GetTrainer(trainerId);
+
+        if (earned && trainer->GetTrainerType() == Trainer::Type::Tradeskill)
+            continue;
 
         for (auto& spell : trainer->GetSpells())
         {
