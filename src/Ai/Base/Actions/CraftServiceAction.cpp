@@ -51,6 +51,11 @@ struct Talk
     time_t until = 0;    // the two have talked: the bot trades with this player until then
     time_t replied = 0;  // the bot's last answer to this player
     time_t listed = 0;   // the bot's last recipe list to this player
+    time_t next = 0;     // no new order before then
+    uint32 order = 0;    // the enchant agreed on
+    uint32 tip = 0;      // in copper
+    bool paid = false;   // trade 1 is done: the bot holds the mats and the tip
+    ObjectGuid warned;   // the last-slot item the bot already explained a refusal for
 };
 std::map<std::pair<ObjectGuid, ObjectGuid>, Talk> talks;  // by (bot, player)
 
@@ -144,6 +149,46 @@ bool IsReagent(Player* bot, uint32 item)
                 return true;
 
     return false;
+}
+
+std::string Link(uint32 spell)
+{
+    SpellInfo const* info = sSpellMgr->GetSpellInfo(spell);
+    return info ? ChatHelper::FormatSpell(info) : "";
+}
+
+std::string Refusal(uint32 spell, char const* reason)
+{
+    std::string const link = spell ? Link(spell) : "";
+    return std::string("No order") + (link.empty() ? "" : " " + link) + ": " + reason;
+}
+
+// The mats the core will take from the bot's bags when it casts the enchant
+std::map<uint32, uint32> Mats(SpellInfo const* spell)
+{
+    std::map<uint32, uint32> mats;
+    for (uint32 i = 0; i < MAX_SPELL_REAGENTS; ++i)
+        if (spell->Reagent[i] > 0 && spell->ReagentCount[i])
+            mats[spell->Reagent[i]] += spell->ReagentCount[i];
+
+    return mats;
+}
+
+// The tools the core checks at the cast even for the trade's triggered spell: a rod, a hammer
+bool HasTools(Player* bot, SpellInfo const* spell)
+{
+    for (uint8 i = 0; i < 2; ++i)
+        if ((spell->Totem[i] && !bot->HasItemCount(spell->Totem[i])) ||
+            (spell->TotemCategory[i] && !bot->HasItemTotemCategory(spell->TotemCategory[i])))
+            return false;
+
+    return true;
+}
+
+// The bot stops crafting for skill while it holds a customer's mats (the earn-professions patches read this)
+void Hold(PlayerbotAI* botAI, time_t until)
+{
+    botAI->GetAiObjectContext()->GetValue<time_t>("last said", "craft order hold")->Set(until);
 }
 
 void Tell(Player* bot, Player* player, std::string const& text) { bot->Whisper(text, LANG_UNIVERSAL, player); }
@@ -316,6 +361,16 @@ std::string CraftService::Command(Player* bot, uint32 type, std::string const& t
         return out.str();
     }
 
+    if (lower.rfind("order ", 0) == 0)
+    {
+        uint32 const spell = SpellIn(text);
+        out << "crafter order " << (spell ? spell : uint32(atoi(lower.c_str() + 6)));
+        return out.str();
+    }
+
+    if (lower.rfind("cancel order", 0) == 0)
+        return "crafter cancel";
+
     return "";
 }
 
@@ -364,8 +419,88 @@ bool CraftService::OnTradeStatus(PlayerbotAI* botAI, Player* trader, uint32 stat
             given[item->GetEntry()] += item->GetCount();
 
     uint32 const gold = theirs->GetMoney();
+    time_t const now = time(nullptr);
+    time_t const talkFor = Conf("Playerbots.RandomBotCraftTalkMinutes", 10) * 60;
+    Talk talk;
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        Talk& stored = talks[{bot->GetGUID(), trader->GetGUID()}];
+        stored.until = now + talkFor;
+        talk = stored;
+    }
 
-    // A tip, alone or with mats for the bot's recipes
+    if (talk.paid)  // the hold lasts as long as the talk
+        Hold(botAI, now + talkFor);
+
+    SpellInfo const* spell = talk.order ? sSpellMgr->GetSpellInfo(talk.order) : nullptr;
+    if (spell && talk.paid)
+    {
+        // Trade 2: the item in the last slot, the enchant on the window, nothing traded but gold
+        if (!given.empty())
+        {
+            Tell(bot, trader, Refusal(talk.order, "unpaid"));
+            return false;
+        }
+
+        if (!theirs->GetItem(TRADE_SLOT_NONTRADED) || mine->GetSpell() != talk.order)
+            return OnTradeItems(botAI, trader);  // sets it; the player accepts again once they see it
+
+        if (!Accept(bot))
+        {
+            // The core's CheckCast refused at the accept (item level, reagents) and cleared the spell
+            Tell(bot, trader, Refusal(talk.order, "failed"));
+            WorldPacket p;
+            bot->GetSession()->HandleCancelTradeOpcode(p);
+            LOG_INFO("playerbots", "[craft] {} failed {} for {}", bot->GetName(), talk.order, trader->GetName());
+            return false;
+        }
+
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            Talk& stored = talks[{bot->GetGUID(), trader->GetGUID()}];
+            stored.order = 0;
+            stored.paid = false;
+            stored.next = now + 30;
+        }
+
+        Hold(botAI, 0);
+        Tell(bot, trader, "Done " + Link(talk.order));
+        LOG_INFO("playerbots", "[craft] {} enchants for {}: {} (tip {}c)", bot->GetName(), trader->GetName(),
+                 talk.order, talk.tip + gold);
+        return true;
+    }
+
+    if (spell)
+    {
+        // Trade 1: at least the mats and the tip; the item in the last slot, if any, stays with the player
+        bool paid = gold >= talk.tip;
+        for (auto const& [entry, count] : Mats(spell))
+            paid = paid && given[entry] >= count;
+
+        if (!paid)
+        {
+            Tell(bot, trader, Refusal(talk.order, "unpaid"));
+            return false;
+        }
+
+        if (!Accept(bot))
+            return false;
+
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            Talk& stored = talks[{bot->GetGUID(), trader->GetGUID()}];
+            stored.paid = true;
+            stored.until = now + talkFor;
+        }
+
+        Hold(botAI, now + talkFor);
+        Tell(bot, trader, "Paid " + Link(talk.order));
+        LOG_INFO("playerbots", "[craft] {} is paid by {} for {}: {}c", bot->GetName(), trader->GetName(),
+                 talk.order, gold);
+        return true;
+    }
+
+    // No order: a tip, alone or with mats for the bot's recipes
     bool gift = gold || !given.empty();
     for (auto const& [entry, count] : given)
         gift = gift && IsReagent(bot, entry);
@@ -384,6 +519,63 @@ bool CraftService::OnTradeStatus(PlayerbotAI* botAI, Player* trader, uint32 stat
     return true;
 }
 
+bool CraftService::OnTradeItems(PlayerbotAI* botAI, Player* trader)
+{
+    Player* bot = botAI->GetBot();
+    TradeData* mine = bot->GetTradeData();
+    TradeData* theirs = trader->GetTradeData();
+    Item* target = theirs ? theirs->GetItem(TRADE_SLOT_NONTRADED) : nullptr;
+    if (!Enabled() || !mine || !target)
+        return false;
+
+    Talk talk;
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        auto it = talks.find({bot->GetGUID(), trader->GetGUID()});
+        if (it == talks.end() || it->second.until <= time(nullptr) || !it->second.order)
+            return false;
+
+        talk = it->second;
+    }
+
+    if (mine->GetSpell() == talk.order)  // already set: SetSpell sends the window again, which lands here
+        return true;
+
+    SpellInfo const* spell = sSpellMgr->GetSpellInfo(talk.order);
+    char const* refusal = nullptr;
+    if (!talk.paid)
+        refusal = "unpaid";
+    else if (!spell || !bot->HasSpell(talk.order) || !target->IsFitToSpellRequirements(spell))
+        refusal = "slot";
+    else if (!HasTools(bot, spell))
+        refusal = "tool";
+    else
+        for (auto const& [entry, count] : Mats(spell))
+            if (!bot->HasItemCount(entry, count))
+                refusal = "mats";
+
+    if (refusal)
+    {
+        bool tell = false;
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            Talk& stored = talks[{bot->GetGUID(), trader->GetGUID()}];
+            tell = stored.warned != target->GetGUID();
+            stored.warned = target->GetGUID();
+        }
+
+        if (tell)
+            Tell(bot, trader, Refusal(talk.order, refusal));
+
+        return true;
+    }
+
+    mine->SetSpell(talk.order);
+    LOG_INFO("playerbots", "[craft] {} puts {} on {}'s {}", bot->GetName(), talk.order, trader->GetName(),
+             target->GetEntry());
+    return true;
+}
+
 bool CraftServiceAction::Execute(Event event)
 {
     Player* owner = event.getOwner();
@@ -398,6 +590,7 @@ bool CraftServiceAction::Execute(Event event)
     time_t const now = time(nullptr);
     time_t const talkFor = Conf("Playerbots.RandomBotCraftTalkMinutes", 10) * 60;
     bool open = false;
+    bool holding = false;
     {
         std::lock_guard<std::mutex> guard(lock);
         if (talks.size() > 4096)
@@ -424,7 +617,12 @@ bool CraftServiceAction::Execute(Event event)
         talk.replied = now;
         if (open)
             talk.until = now + talkFor;
+
+        holding = open && talk.paid;
     }
+
+    if (holding)  // the hold lasts as long as the talk
+        Hold(botAI, now + talkFor);
 
     if (!open)
     {
@@ -439,6 +637,83 @@ bool CraftServiceAction::Execute(Event event)
         Tell(bot, owner, advert.empty() ? Busy() : advert);
         LOG_INFO("playerbots", "[craft] {} answers {}'s {}: {}", bot->GetName(), owner->GetName(),
                  verb == "lf" ? "whisper" : "LF line", advert);
+        return true;
+    }
+
+    if (verb == "order")
+    {
+        SpellInfo const* spell = sSpellMgr->GetSpellInfo(arg);
+        std::vector<CraftService::Recipe> const recipes = CraftService::Recipes(bot);
+        auto recipe = std::find_if(recipes.begin(), recipes.end(),
+                                   [arg](CraftService::Recipe const& r) { return r.spell->Id == arg; });
+        char const* refusal = nullptr;
+        if (!spell || recipe == recipes.end())
+            refusal = "unknown";
+        else if (!spell->HasEffect(SPELL_EFFECT_ENCHANT_ITEM))
+            refusal = "craft";
+        else if (!HasTools(bot, spell))  // before any payment: the core would refuse the cast
+            refusal = "tool";
+
+        uint32 const tip = recipe == recipes.end() ? 0 :
+            std::max<uint32>(100, recipe->rank * Conf("Playerbots.RandomBotCraftTipPerSkill", 2));
+        if (!refusal)
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            Talk& talk = talks[{bot->GetGUID(), owner->GetGUID()}];
+            if (talk.paid || now < talk.next)  // one order at a time, and a pause after each
+                refusal = "busy";
+            else
+            {
+                talk.order = arg;
+                talk.tip = tip;
+                talk.warned = ObjectGuid::Empty;
+            }
+        }
+
+        if (refusal)
+        {
+            Tell(bot, owner, Refusal(spell ? arg : 0, refusal));
+            LOG_INFO("playerbots", "[craft] {} refuses {}'s order {}: {}", bot->GetName(), owner->GetName(), arg,
+                     refusal);
+            return true;
+        }
+
+        // "Order [r]: [item] x<n>, [item] x<n>; tip <copper>c"
+        std::ostringstream out;
+        out << "Order " << Link(arg) << ":";
+        char const* separator = " ";
+        for (auto const& [entry, count] : Mats(spell))
+            if (ItemTemplate const* proto = sObjectMgr->GetItemTemplate(entry))
+            {
+                out << separator << ChatHelper::FormatItem(proto) << " x" << count;
+                separator = ", ";
+            }
+
+        out << "; tip " << tip << "c";
+        Tell(bot, owner, out.str());
+        LOG_INFO("playerbots", "[craft] {} takes {}'s order: {}", bot->GetName(), owner->GetName(), out.str());
+        return true;
+    }
+
+    if (verb == "cancel")
+    {
+        uint32 order = 0;
+        bool paid = false;
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            Talk& talk = talks[{bot->GetGUID(), owner->GetGUID()}];
+            order = talk.order;
+            paid = talk.paid;
+            talk.order = 0;
+            talk.paid = false;
+        }
+
+        if (paid)  // the mats and the tip stay with the bot
+            Hold(botAI, 0);
+
+        Tell(bot, owner, Refusal(order, "canceled"));
+        LOG_INFO("playerbots", "[craft] {} cancels {}'s order {} (paid {})", bot->GetName(), owner->GetName(), order,
+                 paid);
         return true;
     }
 

@@ -808,6 +808,12 @@ Playerbots.RandomBotCraftAdvertGap = 60
 # Default: 10
 Playerbots.RandomBotCraftTalkMinutes = 10
 
+# An enchant order's tip in copper: the skill at which the recipe turns yellow times this, at least
+# 100 (1 silver): 1s40c for a minor enchant, 6s20c at the top of vanilla.
+# The player trades the mats and the tip first, then the item in the "will not be traded" slot.
+# Default: 2
+Playerbots.RandomBotCraftTipPerSkill = 2
+
 # Configure message prefixes which will be excluded in analysis in trade action to open trade window
 Playerbots.TradeActionExcludedPrefixes = "RPLL_H_,DBMv4,{звезда} Questie,{rt1} Questie"
 

@@ -44,6 +44,10 @@ bool Talking(Player* bot, Player* player);
 
 // A trade window event from a player the bot is talking with, under the craft service's rules
 bool OnTradeStatus(PlayerbotAI* botAI, Player* trader, uint32 status);
+
+// The trader's items changed: set a paid enchant on the item in the last slot. True when the craft service
+// handled the change.
+bool OnTradeItems(PlayerbotAI* botAI, Player* trader);
 }  // namespace CraftService
 
 // A random bot standing in a capital posts its LFW line in Trade - City

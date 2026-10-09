@@ -5,6 +5,7 @@
  */
 
 #include "TradeStatusExtendedAction.h"
+#include "CraftServiceAction.h"
 #include "Event.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
@@ -20,6 +21,10 @@ bool TradeStatusExtendedAction::Execute(Event event)
     TradeData* tradeData = trader->GetTradeData();
     if (!tradeData)
         return false;
+
+    // agent-wow local patch (#87): the craft service puts a paid enchant on the item in the last slot
+    if (CraftService::OnTradeItems(botAI, trader))
+        return true;
 
     WorldPacket p(event.getPacket());
     p.rpos(0);
