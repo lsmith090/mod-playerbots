@@ -40,13 +40,7 @@ bool TradeStatusAction::Execute(Event event)
     {
         // agent-wow local patch (#87): a player the bot has talked with trades under the craft service's rules
         if (CraftService::Talking(bot, trader))
-        {
-            WorldPacket p(event.getPacket());
-            p.rpos(0);
-            uint32 status;
-            p >> status;
-            return CraftService::OnTradeStatus(botAI, trader, status);
-        }
+            return false;  // answered from the command queue (PlayerbotAI::HandleBotOutgoingPacket)
 
         bot->Whisper(PlayerbotTextMgr::instance().GetBotTextOrDefault(
                          "trade_busy_now", "I'm kind of busy now", {}),

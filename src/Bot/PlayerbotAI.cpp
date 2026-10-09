@@ -655,6 +655,22 @@ void PlayerbotAI::HandleCommands()
             continue;
         }
 
+        // agent-wow local patch (#289): a craft talk's trade window (queued at the packet) is answered here, outside
+        // the engine, where a passive bot runs one action per 10 s behind whatever else is queued
+        if (command.rfind("crafter trade ", 0) == 0 || command == "crafter items")
+        {
+            if (bot->GetTrader() == owner)
+            {
+                if (command == "crafter items")
+                    CraftService::OnTradeItems(this, owner);
+                else
+                    CraftService::OnTradeStatus(this, owner, atoi(command.c_str() + 14));
+            }
+
+            it = chatCommands.erase(it);
+            continue;
+        }
+
         if (!helper.ParseChatCommand(command, owner) && it->GetType() == CHAT_MSG_WHISPER)
         {
             // ostringstream out; out << "Unknown command " << command;
@@ -1212,6 +1228,23 @@ void PlayerbotAI::HandleBotOutgoingPacket(WorldPacket const& packet)
 
     if (!bot || !bot->IsInWorld() || bot->IsDuringRemoveFromWorld())
         return;
+
+    // agent-wow local patch (#289): a craft talk's trade window is answered from the command queue, at the bot's
+    // next update; the packet triggers ran 7-13 s late and kept one status of several
+    if ((packet.GetOpcode() == SMSG_TRADE_STATUS || packet.GetOpcode() == SMSG_TRADE_STATUS_EXTENDED) &&
+        packet.size() >= 4)
+        if (Player* trader = bot->GetTrader())
+            if (CraftService::Talking(bot, trader))
+            {
+                bool const status = packet.GetOpcode() == SMSG_TRADE_STATUS;
+                std::string const command =
+                    status ? "crafter trade " + std::to_string(packet.read<uint32>(0)) : "crafter items";
+                chatCommands.push_back(ChatCommandHolder(command, trader, CHAT_MSG_WHISPER));
+                nextAICheckDelay = 0;  // the next update, not the passive delay (10 s) of a bot with no one near
+                if (status)
+                    LOG_INFO("playerbots", "[craft] {} gets trade status {} at {}", bot->GetName(),
+                             packet.read<uint32>(0), time(nullptr));
+            }
 
     switch (packet.GetOpcode())
     {

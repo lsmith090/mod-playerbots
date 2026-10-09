@@ -387,6 +387,18 @@ bool CraftService::Talking(Player* bot, Player* player)
 bool CraftService::OnTradeStatus(PlayerbotAI* botAI, Player* trader, uint32 status)
 {
     Player* bot = botAI->GetBot();
+    // Every status the craft service sees, and why it leaves one unanswered (#289)
+    TradeData const* const seen = trader->GetTradeData();
+    LOG_INFO("playerbots", "[craft] {} hears trade status {} from {} at {} (their side {}, {}c)", bot->GetName(),
+             status, trader->GetName(), time(nullptr), !seen ? "closed" : seen->IsAccepted() ? "accepted" : "open",
+             seen ? seen->GetMoney() : 0);
+    auto quiet = [&](char const* why)
+    {
+        LOG_INFO("playerbots", "[craft] {} leaves {}'s trade status {} unanswered: {}", bot->GetName(),
+                 trader->GetName(), status, why);
+        return false;
+    };
+
     if (status == TRADE_STATUS_BEGIN_TRADE)
     {
         if (!bot->HasInArc(CAST_ANGLE_IN_FRONT, trader, sPlayerbotAIConfig.SightDistance))
@@ -400,18 +412,18 @@ bool CraftService::OnTradeStatus(PlayerbotAI* botAI, Player* trader, uint32 stat
     TradeData* mine = bot->GetTradeData();
     TradeData* theirs = trader->GetTradeData();
     if (!mine || !theirs)
-        return false;
+        return quiet("no window");
 
-    if (status != TRADE_STATUS_TRADE_ACCEPT && !(status == TRADE_STATUS_BACK_TO_TRADE && theirs->IsAccepted()))
-        return false;
+    if (!theirs->IsAccepted())
+        return quiet("their side isn't accepted");
 
     // Nothing leaves the bot: its side of the window stays empty
     if (mine->GetMoney())
-        return false;
+        return quiet("money on the bot's side");
 
     for (uint32 slot = 0; slot < TRADE_SLOT_COUNT; ++slot)
         if (mine->GetItem(TradeSlots(slot)))
-            return false;
+            return quiet("an item on the bot's side");
 
     std::map<uint32, uint32> given;
     for (uint32 slot = 0; slot < TRADE_SLOT_TRADED_COUNT; ++slot)
@@ -484,7 +496,7 @@ bool CraftService::OnTradeStatus(PlayerbotAI* botAI, Player* trader, uint32 stat
         }
 
         if (!Accept(bot))
-            return false;
+            return quiet("trade 1's accept left the window open");
 
         {
             std::lock_guard<std::mutex> guard(lock);
@@ -512,7 +524,7 @@ bool CraftService::OnTradeStatus(PlayerbotAI* botAI, Player* trader, uint32 stat
     }
 
     if (!Accept(bot))
-        return false;
+        return quiet("the tip's accept left the window open");
 
     LOG_INFO("playerbots", "[craft] {} takes a tip of {}c and {} item kinds from {}", bot->GetName(), gold,
              given.size(), trader->GetName());
