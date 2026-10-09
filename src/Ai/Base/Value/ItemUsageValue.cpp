@@ -51,7 +51,7 @@ ItemUsage ItemUsageValue::Calculate()
                 needItem = IsItemNeededForUsefullSpell(proto, lowBagSpace);
             else if (proto->Class == ITEM_CLASS_RECIPE)
             {
-                if (bot->HasSpell(proto->Spells[2].SpellId))
+                if (bot->HasSpell(proto->Spells[1].SpellId))
                     needItem = false;
                 else
                     needItem = bot->CanUseItem(proto) == EQUIP_ERR_OK;
@@ -646,7 +646,7 @@ bool ItemUsageValue::IsItemUsefulForSkill(ItemTemplate const* proto)
         }
         case ITEM_CLASS_RECIPE:
         {
-            if (bot->HasSpell(proto->Spells[2].SpellId))
+            if (bot->HasSpell(proto->Spells[1].SpellId))
                 break;
 
             switch (proto->SubClass)

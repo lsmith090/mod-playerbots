@@ -281,6 +281,7 @@ public:
         creators["rpg profession train"] = &ActionContext::rpg_profession_train;
         creators["craft for skill"] = &ActionContext::craft_for_skill;
         creators["buy for trade"] = &ActionContext::buy_for_trade;
+        creators["learn recipe"] = &ActionContext::learn_recipe;
         creators["new rpg do quest"] = &ActionContext::new_rpg_do_quest;
         creators["new rpg travel flight"] = &ActionContext::new_rpg_travel_flight;
         creators["new rpg outdoor pvp"] = &ActionContext::new_rpg_outdoor_pvp;
@@ -491,6 +492,7 @@ private:
     static Action* rpg_profession_train(PlayerbotAI* botAI) { return new RpgProfessionTrainAction(botAI); }
     static Action* craft_for_skill(PlayerbotAI* botAI) { return new CraftForSkillAction(botAI); }
     static Action* buy_for_trade(PlayerbotAI* botAI) { return new BuyForTradeAction(botAI); }
+    static Action* learn_recipe(PlayerbotAI* botAI) { return new LearnRecipeAction(botAI); }
     static Action* new_rpg_do_quest(PlayerbotAI* botAI) { return new NewRpgDoQuestAction(botAI); }
     static Action* new_rpg_travel_flight(PlayerbotAI* botAI) { return new NewRpgTravelFlightAction(botAI); }
     static Action* new_rpg_outdoor_pvp(PlayerbotAI* botAI) { return new NewRpgOutdoorPvpAction(botAI); }

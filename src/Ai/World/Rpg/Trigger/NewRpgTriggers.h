@@ -63,6 +63,14 @@ private:
     uint32 lastVisitStart{0};
 };
 
+// A random bot out of combat carries a recipe item it can learn now (#87)
+class LearnableRecipeTrigger : public Trigger
+{
+public:
+    LearnableRecipeTrigger(PlayerbotAI* botAI) : Trigger(botAI, "learnable recipe", 30) {}
+    bool IsActive() override;
+};
+
 // A random bot stands at the profession trainer its WANDER_NPC visit chose: active once per visit (#87)
 class AtTrainerTrigger : public Trigger
 {

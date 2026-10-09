@@ -92,6 +92,14 @@ void NewRpgStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
     );
     triggers.push_back(
         new TriggerNode(
+            "learnable recipe",
+            {
+                NextAction("learn recipe", 4.0f)
+            }
+        )
+    );
+    triggers.push_back(
+        new TriggerNode(
             "do quest status",
             {
                 NextAction("new rpg do quest", 3.0f)

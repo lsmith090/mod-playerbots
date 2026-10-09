@@ -108,10 +108,18 @@ bool AtVendorTrigger::IsActive()
     if (visit->npcOrGo == lastVendor && botAI->rpgInfo.startT == lastVisitStart)
         return false;
 
-    if (!EarnedProfessions::CraftEnabled(botAI) || !bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_VENDOR))
+    // reagents with RandomBotCraftForSkill, recipes with RandomBotEarnedProfessions
+    if (!(EarnedProfessions::CraftEnabled(botAI) || EarnedProfessions::Enabled(botAI)) ||
+        !bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_VENDOR))
         return false;
 
     lastVendor = visit->npcOrGo;
     lastVisitStart = botAI->rpgInfo.startT;
     return true;
+}
+
+bool LearnableRecipeTrigger::IsActive()
+{
+    return !bot->IsInCombat() && !bot->IsNonMeleeSpellCast(false) && EarnedProfessions::Enabled(botAI) &&
+           EarnedProfessions::LearnableRecipe(botAI);
 }

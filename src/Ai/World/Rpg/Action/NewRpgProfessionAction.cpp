@@ -102,6 +102,20 @@ bool Enabled(PlayerbotAI* botAI)
            sRandomPlayerbotMgr.IsRandomBot(botAI->GetBot()) && !botAI->GetMaster();
 }
 
+Item* LearnableRecipe(PlayerbotAI* botAI)
+{
+    Player* bot = botAI->GetBot();
+    for (Item* item : botAI->GetAiObjectContext()->GetValue<std::vector<Item*>>("inventory items", "recipe")->Get())
+    {
+        // Spells[0] is "Learning" (483) and Spells[1] the recipe; CanUseItem checks the skill rank
+        ItemTemplate const* proto = item->GetTemplate();
+        if (proto->Spells[0].SpellId == 483 && proto->Spells[1].SpellId && !bot->HasSpell(proto->Spells[1].SpellId) &&
+            bot->CanUseItem(item) == EQUIP_ERR_OK)
+            return item;
+    }
+    return nullptr;
+}
+
 bool CraftEnabled(PlayerbotAI* botAI)
 {
     return sConfigMgr->GetOption<bool>("Playerbots.RandomBotCraftForSkill", false) &&
@@ -266,10 +280,13 @@ bool BuyForTradeAction::Execute(Event /*event*/)
     {
         VendorItem const* vendorItem = vendorItems->GetItem(slot);
         ItemTemplate const* proto = vendorItem ? sObjectMgr->GetItemTemplate(vendorItem->item) : nullptr;
-        if (!proto || vendorItem->ExtendedCost || proto->Class == ITEM_CLASS_RECIPE)
+        bool const recipe = proto && proto->Class == ITEM_CLASS_RECIPE;
+        if (!proto || vendorItem->ExtendedCost || !(recipe ? EarnedProfessions::Enabled(botAI)
+                                                           : EarnedProfessions::CraftEnabled(botAI)))
             continue;
 
-        // "skill": a reagent of a known recipe that gives skill, with less than a stack in the bags
+        // "skill": a reagent of a known recipe that gives skill, with less than a stack in the bags; or a recipe the
+        // bot can use (skill rank) and does not know
         if (AI_VALUE2(ItemUsage, "item usage", proto->ItemId) != ITEM_USAGE_SKILL)
             continue;
 
@@ -289,7 +306,22 @@ bool BuyForTradeAction::Execute(Event /*event*/)
     }
 
     if (bought)
-        LOG_INFO("playerbots", "[earned] {} buys {} lots of reagents at {} ({})", bot->GetName(), bought,
+        LOG_INFO("playerbots", "[earned] {} buys {} lots of reagents or recipes at {} ({})", bot->GetName(), bought,
                  vendor->GetName(), vendor->GetEntry());
     return bought > 0;
+}
+
+bool LearnRecipeAction::Execute(Event /*event*/)
+{
+    Item* recipe = EarnedProfessions::LearnableRecipe(botAI);
+    if (!recipe)
+        return false;
+
+    uint32 const itemId = recipe->GetEntry();
+    uint32 const spellId = recipe->GetTemplate()->Spells[1].SpellId;
+    if (!UseItemAuto(recipe))
+        return false;
+
+    LOG_INFO("playerbots", "[earned] {} learns spell {} from recipe item {}", bot->GetName(), spellId, itemId);
+    return true;
 }

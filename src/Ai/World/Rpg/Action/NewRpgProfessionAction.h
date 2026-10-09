@@ -8,7 +8,9 @@
 #define PLAYERBOTS_NEWRPGPROFESSIONACTION_H
 
 #include "Action.h"
+#include "UseItemAction.h"
 
+class Item;
 class Player;
 class PlayerbotAI;
 
@@ -21,6 +23,9 @@ bool Enabled(PlayerbotAI* botAI);
 bool AtCap(Player* bot);
 // "last said" holds the next time the bot looks for a trainer (no new header for a timestamp)
 inline constexpr char const* NEXT_TRAINER_SEARCH = "earned next trainer search";
+
+// a recipe item in the bags that teaches a spell the bot lacks and its skill allows now, or nullptr
+Item* LearnableRecipe(PlayerbotAI* botAI);
 
 // Playerbots.RandomBotCraftForSkill is on, and the bot is a random bot without a master
 bool CraftEnabled(PlayerbotAI* botAI);
@@ -59,12 +64,22 @@ public:
     bool Execute(Event event) override;
 };
 
-// A random bot at the vendor its WANDER_NPC visit chose buys the reagents its skill-up recipes need (item usage
-// "skill": thread, vials, flux), up to a stack each, from its "free money for" tradeskill.
+// A random bot at the vendor its WANDER_NPC visit chose buys, from its "free money for" tradeskill, what item usage
+// calls "skill": the reagents its skill-up recipes need (thread, vials, flux; RandomBotCraftForSkill), up to a stack
+// each, and recipes it can use and lacks (RandomBotEarnedProfessions).
 class BuyForTradeAction : public Action
 {
 public:
     BuyForTradeAction(PlayerbotAI* botAI) : Action(botAI, "buy for trade") {}
+
+    bool Execute(Event event) override;
+};
+
+// A random bot learns from a recipe item in its bags once its skill allows it (#87).
+class LearnRecipeAction : public UseItemAction
+{
+public:
+    LearnRecipeAction(PlayerbotAI* botAI) : UseItemAction(botAI, "learn recipe", true) {}
 
     bool Execute(Event event) override;
 };
