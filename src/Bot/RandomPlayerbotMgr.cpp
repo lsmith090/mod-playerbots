@@ -37,6 +37,7 @@
 #include "RandomPlayerbotFactory.h"
 #include "ServerFacade.h"
 #include "SharedDefines.h"
+#include "TestBots.h"
 #include "TravelMgr.h"
 #include "Unit.h"
 #include "World.h"
@@ -44,6 +45,7 @@
 #include <algorithm>
 #include <boost/thread/thread.hpp>
 #include <cstdlib>
+#include <sstream>
 #include <ctime>
 #include <iomanip>
 #include <random>
@@ -1501,6 +1503,11 @@ bool RandomPlayerbotMgr::ProcessBot(Player* bot)
     if (bot->InBattlegroundQueue())
         return false;
 
+    // agent-wow local patch (#186): a test bot stays as the test set it up: never randomized, refreshed, teleported
+    // or ungrouped. Not revived either: the manager's Revive refreshes and teleports, so a GM revives it (.revive).
+    if (TestBots::IsTestBot(bot))
+        return false;
+
      uint32 botId = bot->GetGUID().GetCounter();
 
     // if death revive
@@ -2538,6 +2545,49 @@ bool RandomPlayerbotMgr::HandlePlayerbotConsoleCommand(ChatHandler* /*handler*/,
     if (cmd == "update")
     {
         sRandomPlayerbotMgr.UpdateAIInternal(0);
+        return true;
+    }
+
+    // agent-wow local patch (#186): a GM logs a test bot in or out, or gives an online one an item; the manager never
+    // logs one in or out on its own. The "add" event lasts a year: a test bot stays in, across restarts too, until
+    // its testlogout.
+    if (cmd.rfind("test", 0) == 0)
+    {
+        std::istringstream in(cmd);
+        std::string verb, name;
+        uint32 item = 0, count = 1;
+        in >> verb >> name >> item >> count;
+        ObjectGuid const guid = sCharacterCache->GetCharacterGuidByName(name);
+        if (!guid || !TestBots::IsTestAccount(sCharacterCache->GetCharacterAccountIdByGuid(guid)))
+        {
+            LOG_ERROR("playerbots", "[testbots] {} is no character of a test account", name);
+            return false;
+        }
+
+        uint32 const bot = guid.GetCounter();
+        Player* player = sRandomPlayerbotMgr.GetPlayerBot(guid);
+        if (verb == "testlogin")
+        {
+            sRandomPlayerbotMgr.SetEventValue(bot, "add", 1, 31104000);
+            sRandomPlayerbotMgr.currentBots.insert(bot);
+            if (!player)
+                sRandomPlayerbotMgr.AddPlayerBot(guid, 0);
+        }
+        else if (verb == "testlogout")
+        {
+            sRandomPlayerbotMgr.SetEventValue(bot, "add", 0, 0);
+            sRandomPlayerbotMgr.currentBots.erase(bot);
+            if (player)
+                sRandomPlayerbotMgr.LogoutPlayerBot(guid);
+        }
+        else if (verb != "testgive" || !player || !item || !player->AddItem(item, count))
+        {
+            LOG_ERROR("playerbots", "[testbots] usage: testlogin <name>, testlogout <name>, "
+                                    "testgive <name> <item> [count] (online, room in its bags)");
+            return false;
+        }
+
+        LOG_INFO("playerbots", "[testbots] {}", cmd);
         return true;
     }
 

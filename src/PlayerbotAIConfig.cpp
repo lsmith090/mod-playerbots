@@ -13,6 +13,7 @@
 #include "PlayerbotGuildMgr.h"
 #include "Playerbots.h"
 #include "RandomItemMgr.h"
+#include "TestBots.h"
 #include "RandomPlayerbotFactory.h"
 #include "RandomPlayerbotMgr.h"
 #include "Talentspec.h"
@@ -763,6 +764,9 @@ bool PlayerbotAIConfig::Initialize()
     {
         return true;
     }
+
+    // agent-wow local patch (#186): test accounts join the random bot account list
+    TestBots::Load();
 
     // Assign account types after accounts are created
     sRandomPlayerbotMgr.AssignAccountTypes();

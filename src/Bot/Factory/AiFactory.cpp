@@ -24,6 +24,7 @@
 #include "SharedDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "TestBots.h"
 #include "WarlockAiObjectContext.h"
 #include "WarriorAiObjectContext.h"
 
@@ -631,6 +632,10 @@ void AiFactory::AddDefaultNonCombatStrategies(Player* player, PlayerbotAI* const
             //     nonCombatEngine->addStrategy("maintenance");
 
             nonCombatEngine->ChangeStrategy(sPlayerbotAIConfig.RandomBotNonCombatStrategies);
+
+            // agent-wow local patch (#186): a test bot stays where a test parks it
+            if (TestBots::IsTestBot(player))
+                nonCombatEngine->ChangeStrategy("-grind,-new rpg,-rpg,-move random,-bg,-lfg,-start duel,-gather,-quest");
         }
         else
         {
