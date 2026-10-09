@@ -188,6 +188,7 @@ public:
         creators["cs"] = &ChatActionContext::cs;
         creators["wts"] = &ChatActionContext::wts;
         creators["suggest craft"] = &ChatActionContext::suggest_craft;
+        creators["crafter"] = &ChatActionContext::crafter;
         creators["hire"] = &ChatActionContext::hire;
         creators["craft"] = &ChatActionContext::craft;
         creators["flag"] = &ChatActionContext::flag;
@@ -226,6 +227,7 @@ private:
     static Action* hire(PlayerbotAI* botAI) { return new HireAction(botAI); }
     static Action* wts(PlayerbotAI* botAI) { return new WtsAction(botAI); }
     static Action* suggest_craft(PlayerbotAI* botAI) { return new SuggestCraftAction(botAI); }
+    static Action* crafter(PlayerbotAI* botAI) { return new CraftServiceAction(botAI); }
     static Action* cs(PlayerbotAI* botAI) { return new CustomStrategyEditAction(botAI); }
     static Action* debug(PlayerbotAI* botAI) { return new DebugAction(botAI); }
     static Action* mail(PlayerbotAI* botAI) { return new MailAction(botAI); }

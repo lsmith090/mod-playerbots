@@ -802,6 +802,12 @@ Playerbots.RandomBotCraftAdvertMinutes = 20
 # Default: 60
 Playerbots.RandomBotCraftAdvertGap = 60
 
+# Minutes a talk lasts. A player and a bot talk once the bot answers the player's "LF <Profession>"
+# line or the player whispers "LF <Profession>" within this long of the bot's LFW; every exchange
+# renews it. Only then does the bot take a trade from a player who is neither master nor group member.
+# Default: 10
+Playerbots.RandomBotCraftTalkMinutes = 10
+
 # Configure message prefixes which will be excluded in analysis in trade action to open trade window
 Playerbots.TradeActionExcludedPrefixes = "RPLL_H_,DBMv4,{звезда} Questie,{rt1} Questie"
 

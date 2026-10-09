@@ -128,6 +128,7 @@ public:
         creators["cdebug"] = &ChatTriggerContext::cdebug;
         creators["cs"] = &ChatTriggerContext::cs;
         creators["wts"] = &ChatTriggerContext::wts;
+        creators["crafter"] = &ChatTriggerContext::crafter;
         // creators["hire"] = &ChatTriggerContext::hire;  // Not correctly implemented at this time, would cause crash and other issues.
         creators["craft"] = &ChatTriggerContext::craft;
         creators["flag"] = &ChatTriggerContext::craft;
@@ -167,6 +168,7 @@ private:
     static Trigger* craft(PlayerbotAI* botAI) { return new ChatCommandTrigger(botAI, "craft"); }
     static Trigger* hire(PlayerbotAI* botAI) { return new ChatCommandTrigger(botAI, "hire"); }
     static Trigger* wts(PlayerbotAI* botAI) { return new ChatCommandTrigger(botAI, "wts"); }
+    static Trigger* crafter(PlayerbotAI* botAI) { return new ChatCommandTrigger(botAI, "crafter"); }
     static Trigger* cs(PlayerbotAI* botAI) { return new ChatCommandTrigger(botAI, "cs"); }
     static Trigger* debug(PlayerbotAI* botAI) { return new ChatCommandTrigger(botAI, "debug"); }
     static Trigger* cdebug(PlayerbotAI* botAI) { return new ChatCommandTrigger(botAI, "cdebug"); }

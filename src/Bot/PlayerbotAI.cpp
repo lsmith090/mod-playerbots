@@ -11,6 +11,7 @@
 #include "CharacterPackets.h"
 #include "ChatHelper.h"
 #include "CheckMountStateAction.h"
+#include "CraftServiceAction.h"
 #include "Common.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
@@ -1024,6 +1025,15 @@ bool PlayerbotAI::IsAllowedCommand(std::string const text)
 
 void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fromPlayer)
 {
+    // agent-wow local patch (#87): the craft service's fixed forms from any player of the bot's side go to
+    // the bot's queue ahead of the security levels; nothing else passes this way
+    std::string const craft = CraftService::Command(bot, type, text, fromPlayer);
+    if (!craft.empty())
+    {
+        chatCommands.push_back(ChatCommandHolder(craft, fromPlayer, type));
+        return;
+    }
+
     if (!GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_INVITE, type != CHAT_MSG_WHISPER, fromPlayer))
         return;
 
