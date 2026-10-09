@@ -50,6 +50,7 @@ struct Talk
 {
     time_t until = 0;    // the two have talked: the bot trades with this player until then
     time_t replied = 0;  // the bot's last answer to this player
+    time_t listed = 0;   // the bot's last recipe list to this player
 };
 std::map<std::pair<ObjectGuid, ObjectGuid>, Talk> talks;  // by (bot, player)
 
@@ -309,6 +310,12 @@ std::string CraftService::Command(Player* bot, uint32 type, std::string const& t
         return out.str();
     }
 
+    if (lower.rfind("recipes", 0) == 0 && (lower.size() == 7 || lower[7] == ' '))
+    {
+        out << "crafter recipes " << SkillAt(lower, 8);
+        return out.str();
+    }
+
     return "";
 }
 
@@ -404,6 +411,12 @@ bool CraftServiceAction::Execute(Event event)
         if (verb == "heard" && talk.until > now)  // already talking: one answer to their LF is enough
             return false;
 
+        if (verb == "recipes" && talk.until > now && now < talk.listed + 30)  // one list per pair per 30 s
+            return false;
+
+        if (verb == "recipes")
+            talk.listed = now;
+
         // The ceremony: the bot answers the player's LF line, or the player answers the bot's advert
         auto advert = adverts.find(bot->GetGUID());
         bool const advertised = advert != adverts.end() && now < advert->second.posted + talkFor;
@@ -426,6 +439,41 @@ bool CraftServiceAction::Execute(Event event)
         Tell(bot, owner, advert.empty() ? Busy() : advert);
         LOG_INFO("playerbots", "[craft] {} answers {}'s {}: {}", bot->GetName(), owner->GetName(),
                  verb == "lf" ? "whisper" : "LF line", advert);
+        return true;
+    }
+
+    if (verb == "recipes")
+    {
+        // "Recipes <Prof> <i>/<n>: [r] [r] [r]", every page, at most 10 a profession (its 30 best)
+        std::vector<uint32> skills;
+        for (uint32 skill : crafts)
+            if ((!arg || arg == skill) && bot->HasSkill(skill))
+                skills.push_back(skill);
+
+        if (arg && skills.empty())
+            skills.push_back(arg);
+
+        for (uint32 skill : skills)
+        {
+            std::vector<CraftService::Recipe> const recipes = CraftService::Recipes(bot, skill);
+            uint32 const pages = std::min<uint32>((recipes.size() + 2) / 3, 10);
+            if (!pages)
+                Tell(bot, owner, "Recipes " + SkillName(skill) + " 0/0:");
+
+            for (uint32 page = 0; page < pages; ++page)
+            {
+                std::ostringstream out;
+                out << "Recipes " << SkillName(skill) << " " << page + 1 << "/" << pages << ":";
+                for (uint32 i = page * 3; i < recipes.size() && i < page * 3 + 3; ++i)
+                    out << " " << ChatHelper::FormatSpell(recipes[i].spell);
+
+                Tell(bot, owner, out.str());
+            }
+
+            LOG_INFO("playerbots", "[craft] {} lists {} {} recipes for {}", bot->GetName(), recipes.size(),
+                     SkillName(skill), owner->GetName());
+        }
+
         return true;
     }
 
