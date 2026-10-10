@@ -42,6 +42,9 @@ std::string Command(Player* bot, uint32 type, std::string const& text, Player* f
 // The two have talked (either side answered the other's advert) within RandomBotCraftTalkMinutes
 bool Talking(Player* bot, Player* player);
 
+// The profession's trade link (|Htrade:...|h[Enchanting]|h): every recipe the bot knows, as the client's bitmask
+std::string TradeLink(Player* bot, uint32 skill);
+
 // A trade window event from a player the bot is talking with, under the craft service's rules
 bool OnTradeStatus(PlayerbotAI* botAI, Player* trader, uint32 status);
 

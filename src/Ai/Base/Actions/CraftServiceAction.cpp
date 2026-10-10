@@ -7,6 +7,7 @@
 #include "CraftServiceAction.h"
 
 #include <algorithm>
+#include <iomanip>
 #include <map>
 #include <mutex>
 
@@ -14,6 +15,7 @@
 #include "ChannelMgr.h"
 #include "ChatHelper.h"
 #include "Config.h"
+#include "DBCStores.h"
 #include "Event.h"
 #include "PlayerbotTextMgr.h"
 #include "Playerbots.h"
@@ -239,6 +241,44 @@ std::vector<CraftService::Recipe> CraftService::Recipes(Player* bot, uint32 skil
     return recipes;
 }
 
+// The profession's trade link, as the 3.3.5 client makes one (#289): every spell of the skill line in
+// SkillLineAbility.dbc, by MinSkillLineRank then ID, one bit each, least significant first, six to a base64 digit.
+// "" when the bot knows no rank spell of the line.
+std::string CraftService::TradeLink(Player* bot, uint32 skill)
+{
+    std::vector<SkillLineAbilityEntry const*> rows;
+    for (uint32 i = 0; i < sSkillLineAbilityStore.GetNumRows(); ++i)
+        if (SkillLineAbilityEntry const* row = sSkillLineAbilityStore.LookupEntry(i))
+            if (row->SkillLine == skill)
+                rows.push_back(row);
+
+    std::sort(rows.begin(), rows.end(), [](SkillLineAbilityEntry const* a, SkillLineAbilityEntry const* b)
+              { return a->MinSkillLineRank != b->MinSkillLineRank ? a->MinSkillLineRank < b->MinSkillLineRank : a->ID < b->ID; });
+
+    static char const digits[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string mask((rows.size() + 5) / 6, 'A');
+    SpellInfo const* rank = nullptr;
+    for (size_t i = 0; i < rows.size(); ++i)
+    {
+        if (!bot->HasSpell(rows[i]->Spell))
+            continue;
+
+        mask[i / 6] = digits[(strchr(digits, mask[i / 6]) - digits) | (1 << (i % 6))];
+        SpellInfo const* info = sSpellMgr->GetSpellInfo(rows[i]->Spell);
+        if (info && info->Effects[0].Effect == SPELL_EFFECT_TRADE_SKILL && (!rank || info->Id > rank->Id))
+            rank = info;
+    }
+
+    if (!rank)
+        return "";
+
+    std::ostringstream out;
+    out << "|cffffd000|Htrade:" << rank->Id << ":" << bot->GetSkillValue(skill) << ":" << bot->GetMaxSkillValue(skill)
+        << ":" << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << bot->GetGUID().GetRawValue()
+        << std::dec << ":" << mask << "|h[" << rank->SpellName[0] << "]|h|r";
+    return out.str();
+}
+
 std::string CraftService::Advert(Player* bot, uint32 skill, uint32 firstSpell)
 {
     std::vector<Recipe> recipes = Recipes(bot, skill);
@@ -250,6 +290,18 @@ std::string CraftService::Advert(Player* bot, uint32 skill, uint32 firstSpell)
 
     std::ostringstream out;
     out << "LFW " << SkillName(skill) << ":";
+
+    // The whole list in one trade link, and the recipe asked for after it; three recipes when there is no link
+    std::string const link = TradeLink(bot, skill);
+    if (!link.empty())
+    {
+        out << " " << link;
+        if (firstSpell && recipes[0].spell->Id == firstSpell)
+            out << " " << ChatHelper::FormatSpell(recipes[0].spell);
+
+        return out.str();
+    }
+
     for (size_t i = 0; i < recipes.size() && i < 3; ++i)
         out << " " << ChatHelper::FormatSpell(recipes[i].spell);
 
