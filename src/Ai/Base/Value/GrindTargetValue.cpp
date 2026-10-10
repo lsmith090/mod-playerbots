@@ -5,11 +5,36 @@
  */
 
 #include "GrindTargetValue.h"
+#include "Config.h"
 #include "NewRpgInfo.h"
 #include "Playerbots.h"
 #include "ReputationMgr.h"
 #include "ServerFacade.h"
 #include "SharedDefines.h"
+
+namespace
+{
+// agent-wow: whether `packSize` other idle mobs stand within 15 yd of the unit.
+// ponytail: counts the other possible targets, not a fresh grid search; a mob out of the bot's sight range is missed.
+bool InPack(Unit* unit, GuidVector const& targets, uint32 packSize)
+{
+    uint32 others = 0;
+    for (ObjectGuid const guid : targets)
+    {
+        if (guid == unit->GetGUID())
+            continue;
+
+        Creature* other = ObjectAccessor::GetCreature(*unit, guid);
+        if (!other || !other->IsAlive() || other->IsInCombat() || other->IsCritter())
+            continue;
+
+        if (other->GetDistance(unit) <= 15.0f && ++others >= packSize)
+            return true;
+    }
+
+    return false;
+}
+}  // namespace
 
 Unit* GrindTargetValue::Calculate()
 {
@@ -55,6 +80,12 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
     Unit* result = nullptr;
     std::unordered_map<uint32, bool> needForQuestMap;
 
+    // agent-wow knobs, read here so PlayerbotAIConfig.h stays untouched (a whole-module recompile).
+    // GrindMaxLevelAbove: the most levels a grind target may stand above the bot (upstream: 4).
+    // GrindPackSize: a solo bot skips a mob with this many other idle mobs within 15 yd of it (0: off).
+    static int32 const maxLevelAbove = sConfigMgr->GetOption<int32>("Playerbots.GrindMaxLevelAbove", 4);
+    static uint32 const packSize = sConfigMgr->GetOption<uint32>("Playerbots.GrindPackSize", 0);
+
     for (ObjectGuid const guid : targets)
     {
         Unit* unit = botAI->GetUnit(guid);
@@ -92,7 +123,12 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
             continue;
         }
 
-        if (!bot->InBattleground() && (int)unit->GetLevel() - (int)bot->GetLevel() > 4 && !unit->GetGUID().IsPlayer())
+        if (!bot->InBattleground() && (int)unit->GetLevel() - (int)bot->GetLevel() > maxLevelAbove &&
+            !unit->GetGUID().IsPlayer())
+            continue;
+
+        // agent-wow: a careful player doesn't pull a mob standing in a pack; the others come along (social aggro).
+        if (packSize && !bot->InBattleground() && !group && unit->ToCreature() && InPack(unit, targets, packSize))
             continue;
 
         if (Creature* creature = unit->ToCreature())

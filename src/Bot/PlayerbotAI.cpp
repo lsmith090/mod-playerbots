@@ -283,6 +283,11 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
 
     AllowActivity();
 
+    // agent-wow: a passive bot (AFK, asleep for PassiveDelay, 10 s) that is attacked wakes at its next update. Before,
+    // it stood still and took the hits until the sleep ran out.
+    if (nextAICheckDelay && bot->IsInCombat() && bot->isAFK() && !HasGameClientMaster())
+        nextAICheckDelay = 0;
+
     // Wake up if combat state changed (unless casting).
     bool isCasting = bot->IsNonMeleeSpellCast(true);
     if (bot->IsInCombat())
@@ -1679,7 +1684,9 @@ void PlayerbotAI::DoNextAction(bool min)
         }
     }
 
-    bool minimal = !this->AllowActivity();
+    // agent-wow: in combat a bot is always active (AllowActive says so); don't let the answer cached before the fight
+    // (up to 5 s) keep it minimal, running only actions of relevance 100 and up.
+    bool minimal = !bot->IsInCombat() && !this->AllowActivity();
 
     currentEngine->DoNextAction(nullptr, 0, (minimal || min));
 

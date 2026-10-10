@@ -30,8 +30,11 @@ void UsePotionsStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
 {
     Strategy::InitTriggers(triggers);
 
+    // agent-wow: the healing potion outranks the rotation. At ACTION_MEDIUM_HEAL + 1 every class's attacks (rend on
+    // attacker, battle shout, execute...) won the tick, and a bot died at 25% hp with ten potions in its bags. The mana
+    // potion waits for low mana: it shares the potion cooldown, and drunk at medium mana it left no healing potion.
     triggers.push_back(new TriggerNode(
-        "critical health", { NextAction("healthstone", ACTION_MEDIUM_HEAL + 1) }));
+        "critical health", { NextAction("healthstone", ACTION_EMERGENCY + 2) }));
     triggers.push_back(
-        new TriggerNode("medium mana", { NextAction("mana potion", ACTION_EMERGENCY) }));
+        new TriggerNode("low mana", { NextAction("mana potion", ACTION_EMERGENCY) }));
 }
