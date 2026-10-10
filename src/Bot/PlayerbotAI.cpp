@@ -1382,6 +1382,12 @@ void PlayerbotAI::HandleBotOutgoingPacket(WorldPacket const& packet)
                 if (!sPlayerbotAIConfig.RandomBotTalk)
                     return;
 
+                // agent-wow local patch (#320): no free-text ChatReply from a random bot; RandomBotTalk stays on for
+                // the emote strategy's suggest what to do and suggest craft
+                if (!sConfigMgr->GetOption<bool>("Playerbots.RandomBotChatReplies", true) &&
+                    sRandomPlayerbotMgr.IsRandomBot(bot))
+                    return;
+
                 if (!AllowActivity())
                     return;
 

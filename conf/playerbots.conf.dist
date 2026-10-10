@@ -1397,6 +1397,11 @@ Playerbots.RandomBotSpeechGeneralMinutes = 10
 # Default: 0 (disabled)
 Playerbots.RandomBotFlee = 0
 
+# Random bots answer other players' chat lines with free-text replies (agent-wow local patch). 0 stops the replies
+# only: RandomBotTalk's suggestions (what to do, craft) go on. Read at every line: a .reload config turns it on or off.
+# Default: 1 (enabled)
+Playerbots.RandomBotChatReplies = 1
+
 # Randombots will pick quests on their own and try to complete them
 # Default: 1 (enabled)
 Playerbots.AutoDoQuests = 1
