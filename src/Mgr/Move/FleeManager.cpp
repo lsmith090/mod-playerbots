@@ -13,7 +13,9 @@ FleeManager::FleeManager(Player* bot, float maxAllowedDistance, float /*followAn
     : bot(bot),
       maxAllowedDistance(maxAllowedDistance),
       forceMaxDistance(forceMaxDistance),
-      startPosition(startPosition ? startPosition : WorldPosition(bot))
+      // agent-wow local patch: a WorldPosition() is MAPID_INVALID, which its operator bool calls true, so a caller that
+      // passed no start kept the invalid one and getMap() read sMapStore out of bounds (patch 14's crash, 2026-10-10)
+      startPosition(startPosition.GetMapId() != MAPID_INVALID ? startPosition : WorldPosition(bot))
 {
 }
 

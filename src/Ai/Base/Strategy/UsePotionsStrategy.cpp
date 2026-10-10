@@ -37,4 +37,9 @@ void UsePotionsStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
         "critical health", { NextAction("healthstone", ACTION_EMERGENCY + 2) }));
     triggers.push_back(
         new TriggerNode("low mana", { NextAction("mana potion", ACTION_EMERGENCY) }));
+    // agent-wow: a random bot outnumbered, or at critical health with no potion it can drink now, runs back the way it
+    // came (Playerbots.RandomBotFlee). Below the potion and the class emergencies (Lay on Hands 91, Divine Shield and
+    // Ice Block 90), above every rotation action: a bot under three mobs stood and fought until dead.
+    triggers.push_back(
+        new TriggerNode("flee back", { NextAction("flee back", ACTION_EMERGENCY - 1) }));
 }
