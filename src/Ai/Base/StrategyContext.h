@@ -24,6 +24,7 @@
 #include "FollowMasterStrategy.h"
 #include "ForceRebuff.h"
 #include "GrindingStrategy.h"
+#include "GroupChat.h"
 #include "GroupStrategy.h"
 #include "GuardStrategy.h"
 #include "GuildStrategy.h"
@@ -121,6 +122,7 @@ public:
         creators["debug quest"] = &StrategyContext::debug_quest;
         creators["maintenance"] = &StrategyContext::maintenance;
         creators["group"] = &StrategyContext::group;
+        creators["bot group"] = &StrategyContext::bot_group;  // agent-wow local patch (#291)
         creators["guild"] = &StrategyContext::guild;
         creators["grind"] = &StrategyContext::grind;
         creators["avoid aoe"] = &StrategyContext::avoid_aoe;
@@ -196,6 +198,7 @@ private:
     static Strategy* debug_quest(PlayerbotAI* botAI) { return new DebugQuestStrategy(botAI); }
     static Strategy* maintenance(PlayerbotAI* botAI) { return new MaintenanceStrategy(botAI); }
     static Strategy* group(PlayerbotAI* botAI) { return new GroupStrategy(botAI); }
+    static Strategy* bot_group(PlayerbotAI* botAI) { return new BotGroupStrategy(botAI); }  // agent-wow #291
     static Strategy* guild (PlayerbotAI* botAI) { return new GuildStrategy(botAI); }
     static Strategy* grind(PlayerbotAI* botAI) { return new GrindingStrategy(botAI); }
     static Strategy* avoid_aoe(PlayerbotAI* botAI) { return new AvoidAoeStrategy(botAI); }

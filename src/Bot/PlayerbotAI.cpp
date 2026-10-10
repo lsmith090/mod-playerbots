@@ -12,6 +12,7 @@
 #include "ChatHelper.h"
 #include "CheckMountStateAction.h"
 #include "CraftServiceAction.h"
+#include "GroupChat.h"
 #include "Common.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
@@ -631,6 +632,8 @@ void PlayerbotAI::HandleCommands()
 {
     ExternalEventHelper helper(aiObjectContext);
 
+    GroupChat::Update(this);  // agent-wow local patch (#291)
+
     for (auto it = chatCommands.begin(); it != chatCommands.end();)
     {
         time_t& checkTime = it->GetTime();
@@ -1050,6 +1053,11 @@ void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fro
         return;
     }
 
+    // agent-wow local patch (#291): the group chat's fixed forms ("inv" is also the item count command) are heard
+    // from the chat packet, by GroupChat::Hear
+    if (GroupChat::Is(type, text))
+        return;
+
     if (!GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_INVITE, type != CHAT_MSG_WHISPER, fromPlayer))
         return;
 
@@ -1291,11 +1299,15 @@ void PlayerbotAI::HandleBotOutgoingPacket(WorldPacket const& packet)
         }
         case SMSG_MESSAGECHAT:  // do not react to self or if not ready to reply
         {
-            if (!sPlayerbotAIConfig.RandomBotTalk)
-                return;
+            // agent-wow local patch (#291): with the group chat on, every bot reads the line (GroupChat::Hear below)
+            if (!GroupChat::Enabled())
+            {
+                if (!sPlayerbotAIConfig.RandomBotTalk)
+                    return;
 
-            if (!AllowActivity())
-                return;
+                if (!AllowActivity())
+                    return;
+            }
 
             WorldPacket p(packet);
             if (!p.empty() && (p.GetOpcode() == SMSG_MESSAGECHAT || p.GetOpcode() == SMSG_GM_MESSAGECHAT))
@@ -1340,6 +1352,20 @@ void PlayerbotAI::HandleBotOutgoingPacket(WorldPacket const& packet)
                 }
 
                 if (chanName == "World")
+                    return;
+
+                // agent-wow local patch (#291): the group chat's fixed forms are heard by every bot, passive or not,
+                // and answered only there, never by the free-text replies below
+                if (GroupChat::Hear(bot, msgtype, guid1, message))
+                {
+                    nextAICheckDelay = 0;  // the next update, not the passive delay (10 s) of a bot with no one near
+                    return;
+                }
+
+                if (!sPlayerbotAIConfig.RandomBotTalk)
+                    return;
+
+                if (!AllowActivity())
                     return;
 
                 // do not reply to self but always try to reply to real player

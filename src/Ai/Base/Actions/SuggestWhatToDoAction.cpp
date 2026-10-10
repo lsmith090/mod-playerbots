@@ -10,6 +10,7 @@
 #include "Channel.h"
 #include "ChatHelper.h"
 #include "Event.h"
+#include "GroupChat.h"
 #include "ItemVisitors.h"
 #include "Playerbots.h"
 #include "ServerFacade.h"
@@ -42,7 +43,9 @@ SuggestWhatToDoAction::SuggestWhatToDoAction(PlayerbotAI* botAI, std::string con
 
 bool SuggestWhatToDoAction::isUseful()
 {
-    if (!sRandomPlayerbotMgr.IsRandomBot(bot) || bot->GetGroup() || bot->GetInstanceId() || bot->GetBattleground())
+    // agent-wow local patch (#291): a leader of an all-bot group with room may still offer a place (LFM)
+    if (!sRandomPlayerbotMgr.IsRandomBot(bot) || (bot->GetGroup() && !GroupChat::CanOffer(botAI)) ||
+        bot->GetInstanceId() || bot->GetBattleground())
         return false;
 
     std::string qualifier = "suggest what to do";
@@ -52,9 +55,14 @@ bool SuggestWhatToDoAction::isUseful()
 
 bool SuggestWhatToDoAction::Execute(Event /*event*/)
 {
-    uint32 index = rand() % suggestions.size();
-    auto fnct_ptr = suggestions[index];
-    fnct_ptr();
+    if (bot->GetGroup())
+        GroupChat::Ask(botAI);  // agent-wow local patch (#291): grouped, only the LFM
+    else
+    {
+        uint32 index = rand() % suggestions.size();
+        auto fnct_ptr = suggestions[index];
+        fnct_ptr();
+    }
 
     std::string const qualifier = "suggest what to do";
     botAI->GetAiObjectContext()->GetValue<time_t>("last said", qualifier)->Set(time(nullptr) + urand(1, 60));
@@ -82,6 +90,10 @@ std::vector<uint32> SuggestWhatToDoAction::GetIncompletedQuests()
 
 void SuggestWhatToDoAction::specificQuest()
 {
+    // agent-wow local patch (#291): a leader-type bot asks in the group chat's fixed form (LFG <quest>) instead
+    if (GroupChat::Ask(botAI))
+        return;
+
     std::vector<uint32> quests = GetIncompletedQuests();
     if (quests.empty())
         return;

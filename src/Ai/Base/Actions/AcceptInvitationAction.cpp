@@ -6,6 +6,7 @@
 
 #include "AcceptInvitationAction.h"
 #include "Event.h"
+#include "GroupChat.h"
 #include "ObjectAccessor.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotSecurity.h"
@@ -53,7 +54,9 @@ bool AcceptInvitationAction::Execute(Event /*event*/)
 
     botAI->TellMaster(PlayerbotTextMgr::instance().GetBotTextOrDefault("hello", "Hello", {}));
 
-    if (sPlayerbotAIConfig.SummonWhenGroup && bot->GetDistance(inviter) > sPlayerbotAIConfig.SightDistance)
+    // agent-wow local patch (#291): a random bot joining another random bot walks to it, never teleports
+    if (sPlayerbotAIConfig.SummonWhenGroup && bot->GetDistance(inviter) > sPlayerbotAIConfig.SightDistance &&
+        !(GroupChat::Enabled() && sRandomPlayerbotMgr.IsRandomBot(inviter)))
     {
         Teleport(inviter, bot, true);
     }

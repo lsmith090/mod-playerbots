@@ -1371,6 +1371,15 @@ Playerbots.RandomBotQuestIds = "3802,5505,6502,7761,7848,10277,10285,11492,13188
 # Note: Currently not functioning properly
 Playerbots.RandomBotGroupNearby = 0
 
+# agent-wow local patch (#291): random bots group by asking and answering in chat, never by a blind invite.
+# A leader-type bot says "LFG <quest link>" (alone) or "LFM <quest link>" (leading an all-bot group with room) in
+# General; a random bot of its side in its zone, alone, within 2 levels and able to do the quest may whisper
+# "inv <quest link>", and the speaker invites it. A player's LFG/LFM gets the same whisper: the player invites.
+# The bot manager keeps a group of random bots only together; a dead bot leaves its group (one life).
+# Add "+bot group" to Playerbots.RandomBotNonCombatStrategies for leave far away (no invite nearby or guild).
+# Default: 0 (disabled)
+Playerbots.RandomBotGroupChat = 0
+
 # Randombots will pick quests on their own and try to complete them
 # Default: 1 (enabled)
 Playerbots.AutoDoQuests = 1

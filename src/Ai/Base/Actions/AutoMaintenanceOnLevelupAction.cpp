@@ -6,6 +6,7 @@
 
 #include "AutoMaintenanceOnLevelupAction.h"
 #include "BroadcastHelper.h"
+#include "GroupChat.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotFactory.h"
 #include "RandomPlayerbotMgr.h"
@@ -28,6 +29,10 @@ void AutoMaintenanceOnLevelupAction::AutoTeleportForLevel()
         return;
 
     if (botAI->HasGameClientMaster())
+        return;
+
+    // agent-wow local patch (#291): the leader of an all-bot group stays with its followers
+    if (GroupChat::Enabled() && bot->GetGroup() && GroupChat::AllRandomBots(bot->GetGroup()))
         return;
 
     sRandomPlayerbotMgr.RandomTeleportForLevel(bot);

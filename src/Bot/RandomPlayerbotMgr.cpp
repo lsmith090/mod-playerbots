@@ -37,6 +37,7 @@
 #include "RandomPlayerbotFactory.h"
 #include "ServerFacade.h"
 #include "SharedDefines.h"
+#include "GroupChat.h"
 #include "TestBots.h"
 #include "TravelMgr.h"
 #include "Unit.h"
@@ -1534,8 +1535,10 @@ bool RandomPlayerbotMgr::ProcessBot(Player* bot)
     }
 
     // leave group if leader is rndbot
+    // agent-wow local patch (#291): unless every member is a random bot (a group the group chat made)
     Group* group = bot->GetGroup();
-    if (group && !group->isLFGGroup() && IsRandomBot(group->GetLeader()))
+    if (group && !group->isLFGGroup() && IsRandomBot(group->GetLeader()) &&
+        !(GroupChat::Enabled() && GroupChat::AllRandomBots(group)))
     {
         botAI->LeaveOrDisbandGroup();
         LOG_INFO("playerbots", "Bot {} remove from group since leader is random bot.", bot->GetName().c_str());
