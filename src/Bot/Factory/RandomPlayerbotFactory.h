@@ -13,6 +13,7 @@
 #include "DBCEnums.h"
 #include "SharedDefines.h"
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -52,6 +53,12 @@ public:
     virtual ~RandomPlayerbotFactory() {}
 
     Player* CreateRandomBot(WorldSession* session, uint8 cls, std::unordered_map<NameRaceAndGender, std::vector<std::string>>& names);
+    // Local patch (agent-wow #318): the account's next missing class, made and saved; false when none is left.
+    bool CreateNextRandomBot(uint32 accountId, WorldSession* session, std::set<uint8>& classesHeld,
+                             std::unordered_map<NameRaceAndGender, std::vector<std::string>>& names, bool& created);
+    static void CreateRandomBotAccount(std::string const& accountName);
+    // .playerbots rndbot addaccounts N: N more random-bot accounts, made at runtime on the world thread a step at a time.
+    static void AddRandomBotAccounts(uint32 count);
     static void CreateRandomBots();
     static std::string const CreateRandomGuildName();
     static uint32 CalculateTotalAccountCount();

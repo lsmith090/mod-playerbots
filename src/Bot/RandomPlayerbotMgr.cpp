@@ -2551,6 +2551,23 @@ bool RandomPlayerbotMgr::HandlePlayerbotConsoleCommand(ChatHandler* /*handler*/,
         return true;
     }
 
+    // agent-wow local patch (#318): N more random-bot accounts, made at runtime a step at a time (RandomPlayerbotFactory).
+    if (cmd.rfind("addaccounts", 0) == 0)
+    {
+        std::istringstream in(cmd.substr(11));
+        uint32 count = 0;
+        in >> count;
+        if (!count || count > 100)
+        {
+            LOG_ERROR("playerbots", "[addaccounts] usage: addaccounts <1-100>");
+            return false;
+        }
+
+        RandomPlayerbotFactory::AddRandomBotAccounts(count);
+        LOG_INFO("playerbots", "[addaccounts] {} account(s) queued", count);
+        return true;
+    }
+
     // agent-wow local patch (#186): a GM logs a test bot in or out, or gives an online one an item; the manager never
     // logs one in or out on its own. The "add" event lasts a year: a test bot stays in, across restarts too, until
     // its testlogout.

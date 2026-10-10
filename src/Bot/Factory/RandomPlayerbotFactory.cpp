@@ -6,6 +6,7 @@
 
 #include "RandomPlayerbotFactory.h"
 
+#include <future>
 #include <set>
 #include "PlayerbotsDatabase.h"
 #include "AccountMgr.h"
@@ -650,20 +651,7 @@ void RandomPlayerbotFactory::CreateRandomBots()
             continue;
         }
         account_creation++;
-        std::string password = "";
-        if (sPlayerbotAIConfig.RandomBotRandomPassword)
-        {
-            for (int i = 0; i < 10; i++)
-            {
-                password += (char)urand('!', 'z');
-            }
-        }
-        else
-            password = accountName;
-
-        sAccountMgr->CreateAccount(accountName, password);
-
-        LOG_DEBUG("playerbots", "Account {} created for random bots", accountName.c_str());
+        CreateRandomBotAccount(accountName);
     }
     if (account_creation)
     {
@@ -754,42 +742,14 @@ void RandomPlayerbotFactory::CreateRandomBots()
             while (held->NextRow());
         }
 
-        for (uint8 cls = CLASS_WARRIOR; cls < MAX_CLASSES && count < 10; ++cls)
+        bool created = false;
+        while (count < 10 && factory.CreateNextRandomBot(accountId, session, classesHeld, nameCache, created))
         {
-            // skip nonexistent classes
-            if (!((1 << (cls - 1)) & CLASSMASK_ALL_PLAYABLE) || !sChrClassesStore.LookupEntry(cls))
-                continue;
-
-            // skip disabled with config classes
-            if ((1 << (cls - 1)) & sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED_CLASSMASK))
-                continue;
-
-            if (classesHeld.count(cls))
-                continue;
-
-            bool playable = false;
-            for (uint8 race = RACE_HUMAN; race < sRaceMgr->GetMaxRaces() && !playable; ++race)
-                playable = !((1 << (race - 1)) & sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED_RACEMASK)) &&
-                           factory.IsValidRaceClassCombination(race, cls, sWorld->getIntConfig(CONFIG_EXPANSION));
-            if (!playable)
-                continue;
-
-            Player* playerBot = factory.CreateRandomBot(session, cls, nameCache);
-            if (!playerBot)
+            if (created)
             {
-                LOG_ERROR("playerbots", "Fail to create character for account {}", accountId);
-                continue;
+                bot_creation++;
+                ++count;
             }
-
-            playerBot->SaveToDB(true, false);
-            sCharacterCache->AddCharacterCacheEntry(playerBot->GetGUID(), accountId, playerBot->GetName(),
-                                                    playerBot->getGender(), playerBot->getRace(),
-                                                    playerBot->getClass(), playerBot->GetLevel());
-            playerBot->CleanupsBeforeDelete();
-            delete playerBot;
-            bot_creation++;
-            ++count;
-            classesHeld.insert(cls);
         }
     }
 
@@ -814,6 +774,234 @@ void RandomPlayerbotFactory::CreateRandomBots()
 
     LOG_INFO("server.loading", ">> {} random bot accounts with {} characters available",
             sPlayerbotAIConfig.RandomBotAccounts.size(), totalRandomBotChars);
+}
+
+void RandomPlayerbotFactory::CreateRandomBotAccount(std::string const& accountName)
+{
+    std::string password = "";
+    if (sPlayerbotAIConfig.RandomBotRandomPassword)
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            password += (char)urand('!', 'z');
+        }
+    }
+    else
+        password = accountName;
+
+    sAccountMgr->CreateAccount(accountName, password);
+
+    LOG_DEBUG("playerbots", "Account {} created for random bots", accountName.c_str());
+}
+
+bool RandomPlayerbotFactory::CreateNextRandomBot(uint32 accountId, WorldSession* session, std::set<uint8>& classesHeld,
+                                                 std::unordered_map<NameRaceAndGender, std::vector<std::string>>& nameCache,
+                                                 bool& created)
+{
+    created = false;
+    for (uint8 cls = CLASS_WARRIOR; cls < MAX_CLASSES; ++cls)
+    {
+        // skip nonexistent classes
+        if (!((1 << (cls - 1)) & CLASSMASK_ALL_PLAYABLE) || !sChrClassesStore.LookupEntry(cls))
+            continue;
+
+        // skip disabled with config classes
+        if ((1 << (cls - 1)) & sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED_CLASSMASK))
+            continue;
+
+        if (classesHeld.count(cls))
+            continue;
+
+        bool playable = false;
+        for (uint8 race = RACE_HUMAN; race < sRaceMgr->GetMaxRaces() && !playable; ++race)
+            playable = !((1 << (race - 1)) & sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED_RACEMASK)) &&
+                       IsValidRaceClassCombination(race, cls, sWorld->getIntConfig(CONFIG_EXPANSION));
+        if (!playable)
+            continue;
+
+        // Tried once, made or not, as the startup loop does.
+        classesHeld.insert(cls);
+
+        Player* playerBot = CreateRandomBot(session, cls, nameCache);
+        if (!playerBot)
+        {
+            LOG_ERROR("playerbots", "Fail to create character for account {}", accountId);
+            return true;
+        }
+
+        playerBot->SaveToDB(true, false);
+        sCharacterCache->AddCharacterCacheEntry(playerBot->GetGUID(), accountId, playerBot->GetName(),
+                                                playerBot->getGender(), playerBot->getRace(),
+                                                playerBot->getClass(), playerBot->GetLevel());
+        playerBot->CleanupsBeforeDelete();
+        delete playerBot;
+        created = true;
+        return true;
+    }
+
+    return false;
+}
+
+// Local patch (agent-wow #318): .playerbots rndbot addaccounts N, more random-bot accounts with no restart and no
+// config reload. Everything that touches the world (accounts, characters, the manager's lists) runs on the world thread
+// through the world thread processor, one small step per operation (its updates are at least 50 ms apart): start one
+// account, wait for its row, give it type 1, make one character, hand the full account to the manager. The name list,
+// one 0.35 s query plus a name check per row, loads off the world thread; the factory's own per-name query takes
+// 0.1-0.15 s on the live database, too long for a step.
+namespace
+{
+    using NameCache = std::unordered_map<RandomPlayerbotFactory::NameRaceAndGender, std::vector<std::string>>;
+
+    struct AddAccountsState
+    {
+        uint32 pending = 0;     // accounts not started yet
+        bool stepping = false;  // an operation is queued
+        std::future<NameCache> loading;
+        NameCache names;
+        std::string name;       // the account being made
+        uint32 accountId = 0;   // its id, once its row is in
+        WorldSession* session = nullptr;
+        std::set<uint8> classesHeld;
+        uint32 characters = 0;
+    };
+    AddAccountsState addAccounts;  // world thread only
+
+    NameCache LoadUnusedNames()
+    {
+        NameCache names;
+        QueryResult result = CharacterDatabase.Query(
+            "SELECT n.name, n.gender FROM playerbots_names n LEFT OUTER JOIN characters c ON c.name = n.name "
+            "WHERE c.guid IS NULL");
+        if (!result)
+            return names;
+
+        do
+        {
+            Field* fields = result->Fetch();
+            std::string const name = fields[0].Get<std::string>();
+            if (ObjectMgr::CheckPlayerName(name) == CHAR_NAME_SUCCESS)
+                names[static_cast<RandomPlayerbotFactory::NameRaceAndGender>(fields[1].Get<uint8>())].push_back(name);
+        } while (result->NextRow());
+
+        return names;
+    }
+
+    // One step; true while there is more to do.
+    bool AddAccountsStep()
+    {
+        AddAccountsState& a = addAccounts;
+        if (a.accountId)
+        {
+            if (a.loading.valid())
+            {
+                if (a.loading.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                    return true;
+                a.names = a.loading.get();
+                LOG_INFO("playerbots", "[addaccounts] names loaded");
+            }
+
+            bool created = false;
+            if (RandomPlayerbotFactory().CreateNextRandomBot(a.accountId, a.session, a.classesHeld, a.names, created))
+            {
+                a.characters += created;
+                return true;
+            }
+
+            // Full: the manager's lists take it. AssignAccountTypes rebuilds the type-1 list from the table (two
+            // small queries; it assigns nothing while the pool holds MaxRandomBots' worth of type-1 accounts).
+            sPlayerbotAIConfig.RandomBotAccounts.push_back(a.accountId);
+            sRandomPlayerbotMgr.AssignAccountTypes();
+            LOG_INFO("playerbots", "[addaccounts] {} ({}) ready with {} characters, {} to go", a.name, a.accountId,
+                     a.characters, a.pending);
+            delete a.session;
+            a.session = nullptr;
+            a.accountId = 0;
+            a.name.clear();
+            a.classesHeld.clear();
+            a.characters = 0;
+            if (a.pending)
+                return true;
+
+            a.names.clear();
+            return false;
+        }
+
+        if (!a.name.empty())
+        {
+            uint32 const accountId = AccountMgr::GetId(a.name);
+            if (!accountId)
+                return true;  // its insert is still in the login database's queue
+
+            PlayerbotsDatabasePreparedStatement* stmt = PlayerbotsDatabase.GetPreparedStatement(PLAYERBOTS_INS_ACCOUNT_TYPE);
+            stmt->SetData(0, accountId);
+            stmt->SetData(1, uint8(1));
+            PlayerbotsDatabase.DirectExecute(stmt);
+
+            a.accountId = accountId;
+            a.session = new WorldSession(accountId, "", 0x0, nullptr, SEC_PLAYER, EXPANSION_WRATH_OF_THE_LICH_KING,
+                                         time_t(0), LOCALE_enUS, 0, false, false, 0);
+            return true;
+        }
+
+        if (!a.pending)
+        {
+            a.names.clear();
+            return false;
+        }
+
+        // The next number after the highest, so the accounts stay rndbot0..N-1 and the startup walk finds them all.
+        std::string const& prefix = sPlayerbotAIConfig.RandomBotAccountPrefix;
+        uint64 number = 0;
+        if (QueryResult result = LoginDatabase.Query(
+                "SELECT COALESCE(MAX(CAST(SUBSTRING(username, {}) AS UNSIGNED)) + 1, 0) FROM account "
+                "WHERE username LIKE '{}%%'",
+                prefix.size() + 1, prefix.c_str()))
+            number = result->Fetch()[0].Get<uint64>();
+
+        --a.pending;
+        a.name = prefix + std::to_string(number);
+        RandomPlayerbotFactory::CreateRandomBotAccount(a.name);
+        LOG_INFO("playerbots", "[addaccounts] creating {}", a.name);
+        return true;
+    }
+
+    class AddAccountsOperation : public PlayerbotOperation
+    {
+    public:
+        explicit AddAccountsOperation(uint32 count) : _count(count) {}
+
+        bool Execute() override
+        {
+            AddAccountsState& a = addAccounts;
+            if (_count)
+            {
+                a.pending += _count;
+                if (a.names.empty() && !a.loading.valid())
+                    a.loading = std::async(std::launch::async, LoadUnusedNames);
+                if (a.stepping)
+                    return true;
+                a.stepping = true;
+            }
+
+            a.stepping = AddAccountsStep() &&
+                         PlayerbotWorldThreadProcessor::instance().QueueOperation(std::make_unique<AddAccountsOperation>(0));
+            if (!a.stepping && (a.pending || a.accountId))
+                LOG_ERROR("playerbots", "[addaccounts] the world thread queue is full: stopped with {} to go; run "
+                                        "addaccounts again to resume", a.pending);
+            return true;
+        }
+
+        std::string GetName() const override { return "AddAccountsOperation"; }
+
+    private:
+        uint32 _count;
+    };
+}
+
+void RandomPlayerbotFactory::AddRandomBotAccounts(uint32 count)
+{
+    if (!PlayerbotWorldThreadProcessor::instance().QueueOperation(std::make_unique<AddAccountsOperation>(count)))
+        LOG_ERROR("playerbots", "[addaccounts] the world thread queue is full: nothing queued");
 }
 
 std::string const RandomPlayerbotFactory::CreateRandomGuildName()
