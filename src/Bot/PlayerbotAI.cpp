@@ -13,6 +13,7 @@
 #include "CheckMountStateAction.h"
 #include "CraftServiceAction.h"
 #include "GroupChat.h"
+#include "SpeechForms.h"
 #include "Common.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
@@ -638,6 +639,7 @@ void PlayerbotAI::HandleCommands()
     ExternalEventHelper helper(aiObjectContext);
 
     GroupChat::Update(this);  // agent-wow local patch (#291)
+    SpeechForms::Update(this);  // agent-wow local patch: danger, need heal
 
     for (auto it = chatCommands.begin(); it != chatCommands.end();)
     {
@@ -1063,6 +1065,10 @@ void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fro
     if (GroupChat::Is(type, text))
         return;
 
+    // agent-wow local patch: the speech forms a member says in party are heard from the chat packet too
+    if (SpeechForms::Is(type, text))
+        return;
+
     if (!GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_INVITE, type != CHAT_MSG_WHISPER, fromPlayer))
         return;
 
@@ -1305,7 +1311,7 @@ void PlayerbotAI::HandleBotOutgoingPacket(WorldPacket const& packet)
         case SMSG_MESSAGECHAT:  // do not react to self or if not ready to reply
         {
             // agent-wow local patch (#291): with the group chat on, every bot reads the line (GroupChat::Hear below)
-            if (!GroupChat::Enabled())
+            if (!GroupChat::Enabled() && !SpeechForms::Enabled())
             {
                 if (!sPlayerbotAIConfig.RandomBotTalk)
                     return;
@@ -1346,6 +1352,7 @@ void PlayerbotAI::HandleBotOutgoingPacket(WorldPacket const& packet)
                         [[fallthrough]];
                     case CHAT_MSG_SAY:
                     case CHAT_MSG_PARTY:
+                    case CHAT_MSG_PARTY_LEADER:  // agent-wow local patch: a leader's party line (speech forms)
                     case CHAT_MSG_YELL:
                     case CHAT_MSG_WHISPER:
                     case CHAT_MSG_GUILD:
@@ -1361,11 +1368,14 @@ void PlayerbotAI::HandleBotOutgoingPacket(WorldPacket const& packet)
 
                 // agent-wow local patch (#291): the group chat's fixed forms are heard by every bot, passive or not,
                 // and answered only there, never by the free-text replies below
-                if (GroupChat::Hear(bot, msgtype, guid1, message))
+                if (GroupChat::Hear(bot, msgtype, guid1, message) || SpeechForms::Hear(bot, msgtype, guid1, message))
                 {
                     nextAICheckDelay = 0;  // the next update, not the passive delay (10 s) of a bot with no one near
                     return;
                 }
+
+                if (msgtype == CHAT_MSG_PARTY_LEADER)  // upstream's free-text replies never saw one
+                    return;
 
                 if (!sPlayerbotAIConfig.RandomBotTalk)
                     return;

@@ -1380,6 +1380,17 @@ Playerbots.RandomBotGroupNearby = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotGroupChat = 0
 
+# Random bots speak fixed forms a player can read and say back (agent-wow local patch):
+# "danger <mob>" when an elite or rare or a second mob comes on (party when grouped, else the zone's General),
+# "need heal" at critical health in a group, "going <place>" when the wander sets out (party only).
+# Heard in party: on danger a bot within 40 yd assists the speaker; on need heal a bot that knows a heal casts it.
+# Default: 0 (disabled)
+Playerbots.RandomBotSpeechForms = 0
+
+# Minutes before a bot says danger in General again for the same mob
+# Default: 10
+Playerbots.RandomBotSpeechGeneralMinutes = 10
+
 # Randombots will pick quests on their own and try to complete them
 # Default: 1 (enabled)
 Playerbots.AutoDoQuests = 1

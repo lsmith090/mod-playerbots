@@ -33,6 +33,7 @@
 #include "Random.h"
 #include "RandomPlayerbotMgr.h"
 #include "SharedDefines.h"
+#include "SpeechForms.h"
 #include "StatsWeightCalculator.h"
 #include "Timer.h"
 #include "TravelMgr.h"
@@ -1144,6 +1145,7 @@ bool NewRpgBaseAction::RandomChangeStatus(std::vector<NewRpgStatus> candidateSta
             if (pos != WorldPosition())
             {
                 botAI->rpgInfo.ChangeToGoGrind(pos);
+                SpeechForms::Going(botAI, pos);  // agent-wow local patch
                 return true;
             }
             return false;
@@ -1154,6 +1156,7 @@ bool NewRpgBaseAction::RandomChangeStatus(std::vector<NewRpgStatus> candidateSta
             if (pos != WorldPosition())
             {
                 botAI->rpgInfo.ChangeToGoCamp(pos);
+                SpeechForms::Going(botAI, pos);  // agent-wow local patch
                 return true;
             }
             return false;
