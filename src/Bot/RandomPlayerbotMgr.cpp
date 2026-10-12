@@ -292,6 +292,21 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 /*elapsed*/, bool /*minimal*/)
     if (!sPlayerbotAIConfig.RandomBotAutologin || !sPlayerbotAIConfig.Enabled)
         return;
 
+    // agent-wow local patch: a realm closed to players (allowedSecurityLevel above 0: a maintenance window) holds every
+    // random bot out, test bots included. The level is read from realmlist at startup, so a restart inside the window
+    // brings none back; at the reopen the next tick refills toward bot_count.
+    if (sWorld->GetPlayerSecurityLimit() > SEC_PLAYER)
+    {
+        if (!playerBots.empty())
+        {
+            LOG_INFO("playerbots", "[closed realm] security {}: logging out {} random bots",
+                     uint32(sWorld->GetPlayerSecurityLimit()), playerBots.size());
+            LogoutAllBots();
+        }
+        SetNextCheckDelay(10000);
+        return;
+    }
+
     /*if (sPlayerbotAIConfig.enablePrototypePerformanceDiff)
     {
         LOG_INFO("playerbots", "---------------------------------------");
