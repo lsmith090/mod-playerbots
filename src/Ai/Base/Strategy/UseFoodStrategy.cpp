@@ -15,6 +15,9 @@ void UseFoodStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
     // agent-wow: a random bot under water with little breath left swims up (Playerbots.RandomBotSurfaceBreath) and
     // catches its breath, ahead of everything else. The same in UsePotionsStrategy, in combat.
     triggers.push_back(new TriggerNode("out of breath", { NextAction("surface", ACTION_EMERGENCY + 3) }));
+    // agent-wow: out of combat the flee's trigger is a strong mob about to notice the bot (RandomBotAvoidElite): it
+    // steps back the way it came. In combat the flee is UsePotionsStrategy's.
+    triggers.push_back(new TriggerNode("flee back", { NextAction("flee back", ACTION_EMERGENCY - 1) }));
     // agent-wow local patch (RandomBotBuyFood): a bot that pays for its food still rests as early as one that cheats
     if (botAI->HasCheat(BotCheatMask::food) || BotFood::KeyOn())
     {

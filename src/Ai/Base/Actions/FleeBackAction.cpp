@@ -29,6 +29,7 @@ struct Run  // where a flee is going, and until when it keeps that spot
     time_t until = 0;
     time_t began = 0;     // when this fight's flee began
     bool stood = false;   // it ran its time with mobs still on it and turned to fight: no more fleeing this fight
+    bool avoid = false;   // out of combat: it is stepping out of a strong mob's way
     bool pet = false;     // its pet was called off for the run
     ReactStates react = REACT_DEFENSIVE;  // and reacted like this before
 };
@@ -110,6 +111,55 @@ bool Clear(PlayerbotAI* botAI, Player* bot, float x, float y)
 
     return true;
 }
+
+// Yards beyond a strong mob's aggro distance at which a bot steps out of its way; 0: strong mobs are mobs like any
+int32 Avoid() { return sConfigMgr->GetOption<int32>("Playerbots.RandomBotAvoidElite", 0); }
+
+// A mob this bot can't fight alone: an elite, rare elite or boss that isn't far below it, or a rare three levels
+// above. Old Icebeard (L11 elite) alone was 424 of 4,804 bot deaths in three days, on bots of level 5 to 9.
+bool Strong(PlayerbotAI* botAI, Player* bot, Creature* mob)
+{
+    if (!mob || !mob->IsAlive() || mob->GetOwnerGUID() || !mob->IsHostileTo(bot))
+        return false;
+
+    uint32 const rank = mob->GetCreatureTemplate()->rank;
+    int32 const above = int32(mob->GetLevel()) - int32(bot->GetLevel());
+    if (rank == CREATURE_ELITE_NORMAL || above < (rank == CREATURE_ELITE_RARE ? 3 : -2))
+        return false;
+
+    return !botAI->GetAiObjectContext()->GetValue<bool>("can fight elite")->Get();
+}
+
+// The strong mob on the bot, if any
+Creature* StrongOn(PlayerbotAI* botAI, Player* bot)
+{
+    if (Avoid() <= 0)
+        return nullptr;
+
+    for (Unit* attacker : bot->getAttackers())
+        if (attacker->GetVictim() == bot && Strong(botAI, bot, attacker->ToCreature()))
+            return attacker->ToCreature();
+
+    return nullptr;
+}
+
+// The strong mob about to notice the bot, if any: within its aggro distance and the margin, and not on the bot yet
+Creature* StrongNear(PlayerbotAI* botAI, Player* bot)
+{
+    int32 const margin = Avoid();
+    if (margin <= 0)
+        return nullptr;
+
+    for (ObjectGuid const guid : botAI->GetAiObjectContext()->GetValue<GuidVector>("possible targets no los")->Get())
+    {
+        Creature* mob = botAI->GetCreature(guid);
+        if (mob && mob->GetVictim() != bot && bot->GetDistance(mob) < mob->GetAttackDistance(bot) + float(margin) &&
+            Strong(botAI, bot, mob))
+            return mob;
+    }
+
+    return nullptr;
+}
 }  // namespace
 
 void FleeBack::Remember(Player* bot)
@@ -120,7 +170,15 @@ void FleeBack::Remember(Player* bot)
 
     std::lock_guard<std::mutex> guard(lock);
     auto run = runs.find(bot->GetGUID());
-    if (run != runs.end())
+    if (run != runs.end() && run->second.avoid)
+    {
+        // Stepping out of a strong mob's way was never a fight: no line, and the step is left to finish
+        if (time(nullptr) < run->second.until && bot->GetExactDist2d(run->second.x, run->second.y) > 3.0f)
+            return;
+
+        runs.erase(run);
+    }
+    else if (run != runs.end())
     {
         LOG_INFO("playerbots", "[flee] {} {} at {:.0f}% hp", bot->GetName(),
                  run->second.stood ? "fought it out" : "got away", bot->GetHealthPct());
@@ -147,9 +205,25 @@ bool FleeBackTrigger::IsActive()
         return false;  // a bot in a pilot's party stays with the pilot
 
     size_t const on = On(bot);
+    bool const careless = BotTraits::Careless(bot);
+    if (StrongOn(botAI, bot))
+        return true;  // at any health: an elite's second hit is too late
+
+    if (!bot->IsInCombat() && Avoid() > 0 && !careless)
+    {
+        // A player watches a patrol come and steps aside. A careless one notices when it is on them.
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            auto run = runs.find(bot->GetGUID());
+            if (run != runs.end() && run->second.avoid && time(nullptr) < run->second.until)
+                return true;
+        }
+
+        return StrongNear(botAI, bot) != nullptr;
+    }
+
     if (on && Commit() > 0)
     {
-        bool const careless = BotTraits::Careless(bot);
         std::lock_guard<std::mutex> guard(lock);
         auto run = runs.find(bot->GetGUID());
         if (run != runs.end() && run->second.began)
@@ -183,9 +257,15 @@ bool FleeBackAction::Execute(Event /*event*/)
         trail = trails[g];
     }
 
-    // It has run long enough for any mob to give up, and they haven't: running on only takes hits in the back
+    bool const fight = bot->IsInCombat();
+    Creature* const strong = fight ? StrongOn(botAI, bot) : StrongNear(botAI, bot);
+    if (fight && run.avoid)  // it stepped aside and was caught all the same: this is a flee from here
+        run.avoid = false, run.until = 0;
+
+    // It has run long enough for any mob to give up, and they haven't: running on only takes hits in the back. Never
+    // from a strong mob: turning on one is death either way.
     int32 const commit = Commit();
-    if (commit > 0 && run.began && now - run.began >= commit)
+    if (commit > 0 && run.began && now - run.began >= commit && !strong)
     {
         LOG_INFO("playerbots", "[flee] {} turns to fight {} mobs at {:.0f}% hp after {} s", bot->GetName(), On(bot),
                  bot->GetHealthPct(), now - run.began);
@@ -198,6 +278,9 @@ bool FleeBackAction::Execute(Event /*event*/)
     // Still running to its spot: keep going
     if (now < run.until && bot->GetExactDist2d(run.x, run.y) > 3.0f && !bot->movespline->Finalized())
         return true;
+
+    if (!fight && !strong)  // the step aside is done and nothing strong is near
+        return false;
 
     // The oldest kept position far enough back that no other mob guards, else FleeManager's spot farthest from them
     // all. The spot taken and every newer one are dropped: they lie toward the pull, so the next leg goes on back or to
@@ -231,7 +314,8 @@ bool FleeBackAction::Execute(Event /*event*/)
     {
         Run next = run;
         next.x = x, next.y = y, next.z = z, next.until = now + KEEP_RUN;
-        if (!next.began)
+        next.avoid = !fight;
+        if (fight && !next.began)
         {
             next.began = now;
             if (commit > 0)
@@ -242,9 +326,18 @@ bool FleeBackAction::Execute(Event /*event*/)
         runs[g] = next;
     }
 
-    if (now >= run.until)  // a new flee, not the next leg of one
-        LOG_INFO("playerbots", "[flee] {} flees {} mobs at {:.0f}% hp to {} {:.0f} yd away", bot->GetName(), On(bot),
-                 bot->GetHealthPct(), back < trail.size() ? "where it came from" : "a scored spot", bot->GetExactDist2d(x, y));
+    std::string const from =
+        strong ? fmt::format(" {} (L{}{})", strong->GetName(), strong->GetLevel(),
+                             strong->GetCreatureTemplate()->rank == CREATURE_ELITE_RARE ? " rare" : " elite")
+               : "";
+    if (!fight && now >= run.until)
+        LOG_INFO("playerbots", "[flee] {} steps out of the way of{} {:.0f} yd off, to {} {:.0f} yd away", bot->GetName(),
+                 from, strong ? bot->GetDistance(strong) : 0.0f,
+                 back < trail.size() ? "where it came from" : "a scored spot", bot->GetExactDist2d(x, y));
+    else if (now >= run.until)  // a new flee, not the next leg of one
+        LOG_INFO("playerbots", "[flee] {} flees {} mobs at {:.0f}% hp to {} {:.0f} yd away{}{}", bot->GetName(), On(bot),
+                 bot->GetHealthPct(), back < trail.size() ? "where it came from" : "a scored spot",
+                 bot->GetExactDist2d(x, y), strong ? ", from" : "", from);
 
     return true;
 }

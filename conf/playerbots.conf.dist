@@ -1404,6 +1404,14 @@ Playerbots.RandomBotFlee = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotFleeCommit = 0
 
+# Random bots keep clear of what they can't fight alone (agent-wow local patch): an elite, rare elite or boss not far
+# below the bot, or a rare three levels above it. Out of combat, a bot within this many yards of such a mob's aggro
+# distance steps back the way it came; with one on it, it flees at any health and doesn't turn to fight. Needs
+# RandomBotFlee above 0. A careless bot (RandomBotCarelessPercent) only runs once it is attacked. 0: off. Read at
+# every check.
+# Default: 0 (disabled)
+Playerbots.RandomBotAvoidElite = 0
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a
