@@ -63,6 +63,26 @@ private:
     uint32 lastVisitStart{0};
 };
 
+// A random bot low on food or drink, between quests, is due to look for a vendor (agent-wow: RandomBotBuyFood)
+class FoodRunDueTrigger : public Trigger
+{
+public:
+    FoodRunDueTrigger(PlayerbotAI* botAI) : Trigger(botAI, "food run due", 10) {}
+    bool IsActive() override;
+};
+
+// A random bot stands at a vendor its WANDER_NPC visit chose: active once per visit (agent-wow: RandomBotBuyFood)
+class AtFoodVendorTrigger : public Trigger
+{
+public:
+    AtFoodVendorTrigger(PlayerbotAI* botAI) : Trigger(botAI, "at food vendor") {}
+    bool IsActive() override;
+
+private:
+    ObjectGuid lastVendor;
+    uint32 lastVisitStart{0};
+};
+
 // A random bot out of combat carries a recipe item it can learn now (#87)
 class LearnableRecipeTrigger : public Trigger
 {

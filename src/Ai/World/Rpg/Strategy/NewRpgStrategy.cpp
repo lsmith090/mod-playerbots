@@ -82,6 +82,24 @@ void NewRpgStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
             }
         )
     );
+    // agent-wow local patch (RandomBotBuyFood): a bot low on food or drink sets out for a vendor ahead of its trainer,
+    // and tops up at any vendor its wander reaches
+    triggers.push_back(
+        new TriggerNode(
+            "food run due",
+            {
+                NextAction("new rpg go food vendor", 3.6f)
+            }
+        )
+    );
+    triggers.push_back(
+        new TriggerNode(
+            "at food vendor",
+            {
+                NextAction("buy own food", 4.0f)
+            }
+        )
+    );
     triggers.push_back(
         new TriggerNode(
             "can craft for skill",

@@ -5,6 +5,7 @@
  */
 
 #include "UseFoodStrategy.h"
+#include "NewRpgFoodAction.h"
 #include "PlayerbotAIConfig.h"
 #include "Playerbots.h"
 
@@ -14,7 +15,8 @@ void UseFoodStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
     // agent-wow: a random bot under water with little breath left swims up (Playerbots.RandomBotSurfaceBreath) and
     // catches its breath, ahead of everything else. The same in UsePotionsStrategy, in combat.
     triggers.push_back(new TriggerNode("out of breath", { NextAction("surface", ACTION_EMERGENCY + 3) }));
-    if (botAI->HasCheat(BotCheatMask::food))
+    // agent-wow local patch (RandomBotBuyFood): a bot that pays for its food still rests as early as one that cheats
+    if (botAI->HasCheat(BotCheatMask::food) || BotFood::KeyOn())
     {
         triggers.push_back(new TriggerNode("medium health", { NextAction("food", 3.0f) }));
         triggers.push_back(new TriggerNode("high mana", { NextAction("drink", 3.0f) }));

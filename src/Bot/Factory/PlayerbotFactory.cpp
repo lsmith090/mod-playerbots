@@ -22,6 +22,7 @@
 #include "ItemVisitors.h"
 #include "Log.h"
 #include "LootMgr.h"
+#include "NewRpgFoodAction.h"
 #include "ObjectMgr.h"
 #include "PerfMonitor.h"
 #include "PetDefines.h"
@@ -4317,6 +4318,10 @@ void PlayerbotFactory::InitFood()
     {
         return;
     }
+    // agent-wow local patch (RandomBotBuyFood): a random bot is handed food only with its level 1 kit; from then on
+    // it buys its own
+    if (BotFood::KeyOn() && bot->GetLevel() > 1 && sRandomPlayerbotMgr.IsRandomBot(bot))
+        return;
     std::unordered_map<uint32, std::vector<uint32>> items;
     ItemTemplateContainer const* itemTemplateContainer = sObjectMgr->GetItemTemplateStore();
     for (ItemTemplateContainer::const_iterator i = itemTemplateContainer->begin(); i != itemTemplateContainer->end();

@@ -250,6 +250,8 @@ public:
         creators["at vendor for trade"] = &TriggerContext::at_vendor_for_trade;
         creators["can craft for skill"] = &TriggerContext::can_craft_for_skill;
         creators["learnable recipe"] = &TriggerContext::learnable_recipe;
+        creators["food run due"] = &TriggerContext::food_run_due;
+        creators["at food vendor"] = &TriggerContext::at_food_vendor;
         creators["do quest status"] = &TriggerContext::do_quest_status;
         creators["travel flight status"] = &TriggerContext::travel_flight_status;
         creators["outdoor pvp status"] = &TriggerContext::outdoor_pvp_status;
@@ -469,6 +471,8 @@ private:
     static Trigger* profession_training_due(PlayerbotAI* botAI) { return new ProfessionTrainingDueTrigger(botAI); }
     static Trigger* at_trainer(PlayerbotAI* botAI) { return new AtTrainerTrigger(botAI); }
     static Trigger* at_vendor_for_trade(PlayerbotAI* botAI) { return new AtVendorTrigger(botAI); }
+    static Trigger* food_run_due(PlayerbotAI* botAI) { return new FoodRunDueTrigger(botAI); }
+    static Trigger* at_food_vendor(PlayerbotAI* botAI) { return new AtFoodVendorTrigger(botAI); }
     static Trigger* can_craft_for_skill(PlayerbotAI* botAI) { return new CraftForSkillTrigger(botAI); }
     static Trigger* learnable_recipe(PlayerbotAI* botAI) { return new LearnableRecipeTrigger(botAI); }
     static Trigger* do_quest_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_DO_QUEST); }

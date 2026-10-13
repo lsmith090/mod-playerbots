@@ -46,6 +46,7 @@
 #include "FleeBackAction.h"
 #include "SurfaceAction.h"
 #include "AuctionSellAction.h"
+#include "NewRpgFoodAction.h"
 #include "NewRpgProfessionAction.h"
 #include "NewRpgAction.h"
 #include "NewRpgDoGather.h"
@@ -286,6 +287,8 @@ public:
         creators["craft for skill"] = &ActionContext::craft_for_skill;
         creators["buy for trade"] = &ActionContext::buy_for_trade;
         creators["learn recipe"] = &ActionContext::learn_recipe;
+        creators["new rpg go food vendor"] = &ActionContext::new_rpg_go_food_vendor;
+        creators["buy own food"] = &ActionContext::buy_own_food;
         creators["new rpg do quest"] = &ActionContext::new_rpg_do_quest;
         creators["new rpg travel flight"] = &ActionContext::new_rpg_travel_flight;
         creators["new rpg outdoor pvp"] = &ActionContext::new_rpg_outdoor_pvp;
@@ -498,6 +501,8 @@ private:
     static Action* rpg_profession_train(PlayerbotAI* botAI) { return new RpgProfessionTrainAction(botAI); }
     static Action* craft_for_skill(PlayerbotAI* botAI) { return new CraftForSkillAction(botAI); }
     static Action* buy_for_trade(PlayerbotAI* botAI) { return new BuyForTradeAction(botAI); }
+    static Action* new_rpg_go_food_vendor(PlayerbotAI* botAI) { return new NewRpgGoFoodVendorAction(botAI); }
+    static Action* buy_own_food(PlayerbotAI* botAI) { return new BuyOwnFoodAction(botAI); }
     static Action* learn_recipe(PlayerbotAI* botAI) { return new LearnRecipeAction(botAI); }
     static Action* new_rpg_do_quest(PlayerbotAI* botAI) { return new NewRpgDoQuestAction(botAI); }
     static Action* new_rpg_travel_flight(PlayerbotAI* botAI) { return new NewRpgTravelFlightAction(botAI); }

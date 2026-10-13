@@ -1533,6 +1533,14 @@ Playerbots.RandomBotEarnedProfessions = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotCraftForSkill = 0
 
+# Randombots buy their own food and drink (agent-wow). It matters once "food" is out of Playerbots.BotCheats: with
+# the cheat a bot eats nothing it carries. A bot under 5 food (or drink, if it has mana) walks to the nearest
+# friendly vendor within 1500 yd that sells some it can use and pay for, and at any vendor its RPG wander reaches it
+# fills up to 40 of each from its own money. It rests at MediumHealth and HighMana as it does with the cheat, and
+# the factory hands a random bot food only with its level 1 kit.
+# Default: 0 (disabled)
+Playerbots.RandomBotBuyFood = 0
+
 # Control probability weights for RPG status of bots. Takes effect only when the status meets its premise.​
 # Sum of weights need not be 100. Set to 0 to disable the status.
 #
