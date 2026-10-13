@@ -118,6 +118,40 @@ void NewRpgStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
             }
         )
     );
+    // agent-wow local patch (RandomBotAuctionBuy): a bot with money or goods goes to an auctioneer now and then, buys
+    // the best gear it can afford there (patch 2 lists on the same visit), and takes its auction mail at a mailbox
+    triggers.push_back(
+        new TriggerNode(
+            "auction run due",
+            {
+                NextAction("new rpg go auctioneer", 3.5f)
+            }
+        )
+    );
+    triggers.push_back(
+        new TriggerNode(
+            "at auctioneer to buy",
+            {
+                NextAction("ah buy", 3.95f)
+            }
+        )
+    );
+    triggers.push_back(
+        new TriggerNode(
+            "mailbox run due",
+            {
+                NextAction("new rpg go mailbox", 3.55f)
+            }
+        )
+    );
+    triggers.push_back(
+        new TriggerNode(
+            "at mailbox",
+            {
+                NextAction("take auction mail", 4.0f)
+            }
+        )
+    );
     triggers.push_back(
         new TriggerNode(
             "can craft for skill",

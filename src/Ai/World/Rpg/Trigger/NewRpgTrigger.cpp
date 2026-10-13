@@ -6,6 +6,8 @@
 
 #include "NewRpgTriggers.h"
 #include "Config.h"
+#include "GameObject.h"
+#include "NewRpgAuctionAction.h"
 #include "NewRpgErrandsAction.h"
 #include "NewRpgFoodAction.h"
 #include "NewRpgProfessionAction.h"
@@ -116,6 +118,80 @@ bool AtVendorTrigger::IsActive()
         return false;
 
     lastVendor = visit->npcOrGo;
+    lastVisitStart = botAI->rpgInfo.startT;
+    return true;
+}
+
+namespace
+{
+// not while questing, flying or already walking somewhere chosen
+bool Idle(PlayerbotAI* botAI)
+{
+    switch (botAI->rpgInfo.GetStatus())
+    {
+        case RPG_IDLE:
+        case RPG_WANDER_RANDOM:
+        case RPG_WANDER_NPC:
+        case RPG_GO_GRIND:
+        case RPG_REST:
+            return true;
+        default:
+            return false;
+    }
+}
+}  // namespace
+
+bool AuctionRunDueTrigger::IsActive()
+{
+    return Idle(botAI) && !bot->IsInCombat() && BotAuction::Enabled(botAI) && bot->GetLevel() >= BotAuction::MIN_LEVEL &&
+           AI_VALUE2(time_t, "last said", BotAuction::NEXT_RUN) <= time(nullptr) &&
+           (bot->GetMoney() >= BotAuction::MIN_COPPER || BotAuction::Pieces(bot) >= BotAuction::MIN_PIECES);
+}
+
+bool AtAuctioneerToBuyTrigger::IsActive()
+{
+    auto* visit = std::get_if<NewRpgInfo::WanderNpc>(&botAI->rpgInfo.data);
+    if (!visit || !visit->npcOrGo)
+        return false;
+
+    // one try per visit, bought or not
+    if (visit->npcOrGo == lastAuctioneer && botAI->rpgInfo.startT == lastVisitStart)
+        return false;
+
+    if (!BotAuction::Enabled(botAI) || !bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_AUCTIONEER))
+        return false;
+
+    lastAuctioneer = visit->npcOrGo;
+    lastVisitStart = botAI->rpgInfo.startT;
+    return true;
+}
+
+bool MailboxRunDueTrigger::IsActive()
+{
+    if (!Idle(botAI) || bot->IsInCombat() || !BotAuction::Enabled(botAI) || !BotAuction::HasMail(bot))
+        return false;
+
+    // already on its way to one
+    auto* visit = std::get_if<NewRpgInfo::WanderNpc>(&botAI->rpgInfo.data);
+    if (visit && visit->npcOrGo.IsGameObject())
+        return false;
+
+    return bot->FindNearestGameObjectOfType(GAMEOBJECT_TYPE_MAILBOX, 100.0f) != nullptr;
+}
+
+bool AtMailboxTrigger::IsActive()
+{
+    auto* visit = std::get_if<NewRpgInfo::WanderNpc>(&botAI->rpgInfo.data);
+    if (!visit || !visit->npcOrGo.IsGameObject())
+        return false;
+
+    if (visit->npcOrGo == lastMailbox && botAI->rpgInfo.startT == lastVisitStart)
+        return false;
+
+    if (!BotAuction::Enabled(botAI) || !bot->GetGameObjectIfCanInteractWith(visit->npcOrGo, GAMEOBJECT_TYPE_MAILBOX))
+        return false;
+
+    lastMailbox = visit->npcOrGo;
     lastVisitStart = botAI->rpgInfo.startT;
     return true;
 }

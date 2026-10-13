@@ -46,6 +46,7 @@
 #include "FleeBackAction.h"
 #include "SurfaceAction.h"
 #include "AuctionSellAction.h"
+#include "NewRpgAuctionAction.h"
 #include "NewRpgErrandsAction.h"
 #include "NewRpgFoodAction.h"
 #include "NewRpgProfessionAction.h"
@@ -292,6 +293,10 @@ public:
         creators["buy own food"] = &ActionContext::buy_own_food;
         creators["new rpg go repair"] = &ActionContext::new_rpg_go_repair;  // agent-wow local patch
         creators["vendor errands"] = &ActionContext::vendor_errands;  // agent-wow local patch
+        creators["new rpg go auctioneer"] = &ActionContext::new_rpg_go_auctioneer;  // agent-wow local patch
+        creators["ah buy"] = &ActionContext::ah_buy;  // agent-wow local patch
+        creators["new rpg go mailbox"] = &ActionContext::new_rpg_go_mailbox;  // agent-wow local patch
+        creators["take auction mail"] = &ActionContext::take_auction_mail;  // agent-wow local patch
         creators["new rpg do quest"] = &ActionContext::new_rpg_do_quest;
         creators["new rpg travel flight"] = &ActionContext::new_rpg_travel_flight;
         creators["new rpg outdoor pvp"] = &ActionContext::new_rpg_outdoor_pvp;
@@ -508,6 +513,10 @@ private:
     static Action* buy_own_food(PlayerbotAI* botAI) { return new BuyOwnFoodAction(botAI); }
     static Action* new_rpg_go_repair(PlayerbotAI* botAI) { return new NewRpgGoRepairAction(botAI); }
     static Action* vendor_errands(PlayerbotAI* botAI) { return new VendorErrandsAction(botAI); }
+    static Action* new_rpg_go_auctioneer(PlayerbotAI* botAI) { return new NewRpgGoAuctioneerAction(botAI); }
+    static Action* ah_buy(PlayerbotAI* botAI) { return new AhBuyAction(botAI); }
+    static Action* new_rpg_go_mailbox(PlayerbotAI* botAI) { return new NewRpgGoMailboxAction(botAI); }
+    static Action* take_auction_mail(PlayerbotAI* botAI) { return new TakeAuctionMailAction(botAI); }
     static Action* learn_recipe(PlayerbotAI* botAI) { return new LearnRecipeAction(botAI); }
     static Action* new_rpg_do_quest(PlayerbotAI* botAI) { return new NewRpgDoQuestAction(botAI); }
     static Action* new_rpg_travel_flight(PlayerbotAI* botAI) { return new NewRpgTravelFlightAction(botAI); }

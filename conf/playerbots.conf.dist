@@ -1582,6 +1582,14 @@ Playerbots.RandomBotBuyFood = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotEarnedGear = 0
 
+# Random bots take part in the auction house (agent-wow local patch). A random bot of level 6 or more with 10 silver,
+# or three unbound pieces of uncommon quality, walks to the nearest friendly auctioneer on its map within 3000 yd, at
+# most every two hours. There it buys out the one piece of gear that improves what it wears the most, for no more
+# than half its money (Playerbots.RandomBotAuctionSell lists on the same visit). With auction mail and a mailbox in
+# sight it takes the mail: what its sales fetched, what it won and what came back. Read at every check.
+# Default: 0 (disabled)
+Playerbots.RandomBotAuctionBuy = 0
+
 # Control probability weights for RPG status of bots. Takes effect only when the status meets its premise.​
 # Sum of weights need not be 100. Set to 0 to disable the status.
 #

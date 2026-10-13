@@ -64,6 +64,46 @@ private:
 };
 
 // A random bot low on food or drink, between quests, is due to look for a vendor (agent-wow: RandomBotBuyFood)
+// agent-wow local patch (RandomBotAuctionBuy): the bot has money or goods for an auctioneer and may set out for one
+class AuctionRunDueTrigger : public Trigger
+{
+public:
+    AuctionRunDueTrigger(PlayerbotAI* botAI) : Trigger(botAI, "auction run due", 30) {}
+    bool IsActive() override;
+};
+
+// agent-wow local patch (RandomBotAuctionBuy): the bot stands at the auctioneer its wander chose, once a visit
+class AtAuctioneerToBuyTrigger : public Trigger
+{
+public:
+    AtAuctioneerToBuyTrigger(PlayerbotAI* botAI) : Trigger(botAI, "at auctioneer to buy") {}
+    bool IsActive() override;
+
+private:
+    ObjectGuid lastAuctioneer;
+    uint32 lastVisitStart{0};
+};
+
+// agent-wow local patch (RandomBotAuctionBuy): the bot has auction mail and a mailbox in sight
+class MailboxRunDueTrigger : public Trigger
+{
+public:
+    MailboxRunDueTrigger(PlayerbotAI* botAI) : Trigger(botAI, "mailbox run due", 30) {}
+    bool IsActive() override;
+};
+
+// agent-wow local patch (RandomBotAuctionBuy): the bot stands at the mailbox its visit chose, once a visit
+class AtMailboxTrigger : public Trigger
+{
+public:
+    AtMailboxTrigger(PlayerbotAI* botAI) : Trigger(botAI, "at mailbox") {}
+    bool IsActive() override;
+
+private:
+    ObjectGuid lastMailbox;
+    uint32 lastVisitStart{0};
+};
+
 // agent-wow local patch (RandomBotEarnedGear): the bot's gear is worn and it may look for a repairer
 class RepairRunDueTrigger : public Trigger
 {
