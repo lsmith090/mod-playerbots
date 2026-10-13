@@ -1412,6 +1412,15 @@ Playerbots.RandomBotFleeCommit = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotAvoidElite = 0
 
+# A group of random bots flees as one (agent-wow local patch). Outnumbered is counted for the members standing
+# together (within 40 yd): the mobs on all of them against RandomBotFlee plus one for each mate, so a member with two
+# mobs on it no longer runs off while its mates fight them. When one does flee for the group's reason (outnumbered
+# together, or a strong mob on any of them), it calls it: every mate in the fight runs to the caller's spot. A member
+# at critical health still steps back alone, and a careless bot fights on. 0: every member decides alone. Read at
+# every check.
+# Default: 0 (disabled)
+Playerbots.RandomBotGroupFlee = 0
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a

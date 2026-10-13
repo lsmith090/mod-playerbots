@@ -10,11 +10,14 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <set>
+#include <vector>
 
 #include "BotTraits.h"
 #include "CharmInfo.h"
 #include "Config.h"
 #include "FleeManager.h"
+#include "Group.h"
 #include "MoveSpline.h"
 #include "Pet.h"
 #include "Playerbots.h"
@@ -130,17 +133,86 @@ bool Strong(PlayerbotAI* botAI, Player* bot, Creature* mob)
     return !botAI->GetAiObjectContext()->GetValue<bool>("can fight elite")->Get();
 }
 
-// The strong mob on the bot, if any
-Creature* StrongOn(PlayerbotAI* botAI, Player* bot)
+// 1: a group of random bots flees as one. 0: every member decides alone, as before
+int32 GroupKnob() { return sConfigMgr->GetOption<int32>("Playerbots.RandomBotGroupFlee", 0); }
+
+struct Call  // a group's call to flee: where, until when it stands, and who made it
+{
+    float x = 0.0f, y = 0.0f, z = 0.0f;
+    uint32 map = 0;
+    time_t until = 0;
+    ObjectGuid caller;
+};
+
+std::map<ObjectGuid, Call> calls;  // by group; ponytail: never pruned, one per group ever seen
+float const HERE = 40.0f;          // a living groupmate within this is in the fight with the bot
+float const HEED = 150.0f;         // a call's spot farther than this is somebody else's fight
+time_t const KEEP_CALL = 12;       // s a call stands: a mob's 11 s, and the caller's next leg renews it
+
+// The bot and the living groupmates standing with it. Just the bot when it has no group or the key is off. Mates on
+// the bot's map update on its thread.
+std::vector<Player*> Party(Player* bot)
+{
+    std::vector<Player*> party{bot};
+    Group* group = bot->GetGroup();
+    if (!group || GroupKnob() <= 0)
+        return party;
+
+    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+    {
+        Player* mate = ref->GetSource();
+        if (mate && mate != bot && mate->IsInWorld() && mate->IsAlive() && mate->GetMap() == bot->GetMap() &&
+            bot->GetDistance(mate) < HERE)
+            party.push_back(mate);
+    }
+
+    return party;
+}
+
+// The mobs on the party within range of the member they are on
+size_t OnParty(std::vector<Player*> const& party)
+{
+    std::set<ObjectGuid> mobs;
+    for (Player* member : party)
+        for (Unit* attacker : member->getAttackers())
+            if (attacker->ToCreature() && attacker->IsAlive() && attacker->GetVictim() == member &&
+                member->GetDistance(attacker) < RANGE)
+                mobs.insert(attacker->GetGUID());
+
+    return mobs.size();
+}
+
+// The strong mob on any of the party, by this bot's measure
+Creature* StrongOnParty(PlayerbotAI* botAI, Player* bot, std::vector<Player*> const& party)
 {
     if (Avoid() <= 0)
         return nullptr;
 
-    for (Unit* attacker : bot->getAttackers())
-        if (attacker->GetVictim() == bot && Strong(botAI, bot, attacker->ToCreature()))
-            return attacker->ToCreature();
+    for (Player* member : party)
+        for (Unit* attacker : member->getAttackers())
+            if (attacker->GetVictim() == member && Strong(botAI, bot, attacker->ToCreature()))
+                return attacker->ToCreature();
 
     return nullptr;
+}
+
+// The call standing for the bot's group, if it is near enough to be the bot's fight
+bool Called(Player* bot, time_t now, Call* out = nullptr)
+{
+    Group* group = bot->GetGroup();
+    if (!group)
+        return false;
+
+    std::lock_guard<std::mutex> guard(lock);
+    auto call = calls.find(group->GetGUID());
+    if (call == calls.end() || now >= call->second.until || call->second.map != bot->GetMapId() ||
+        bot->GetExactDist2d(call->second.x, call->second.y) > HEED)
+        return false;
+
+    if (out)
+        *out = call->second;
+
+    return true;
 }
 
 // The strong mob about to notice the bot, if any: within its aggro distance and the margin, and not on the bot yet
@@ -206,8 +278,9 @@ bool FleeBackTrigger::IsActive()
 
     size_t const on = On(bot);
     bool const careless = BotTraits::Careless(bot);
-    if (StrongOn(botAI, bot))
-        return true;  // at any health: an elite's second hit is too late
+    std::vector<Player*> const party = Party(bot);
+    if (StrongOnParty(botAI, bot, party))
+        return true;  // at any health: an elite's second hit is too late, on the bot or on a mate beside it
 
     if (!bot->IsInCombat() && Avoid() > 0 && !careless)
     {
@@ -238,7 +311,19 @@ bool FleeBackTrigger::IsActive()
         }
     }
 
-    return on >= size_t(n) || (on && bot->GetHealthPct() < sPlayerbotAIConfig.CriticalHealth);
+    // A group flees as one: a mate's call is the bot's too while it is in the fight. A careless bot fights on.
+    if (party.size() > 1 && bot->IsInCombat() && !careless && Called(bot, time(nullptr)))
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        auto run = runs.find(bot->GetGUID());
+        return run == runs.end() || !run->second.stood;
+    }
+
+    // Outnumbered is counted for the party: the mobs on all of it against its heads. Alone that is RandomBotFlee
+    // mobs; two together stand against one more, and so on. A member with two mobs on it no longer runs off while
+    // its mates fight them, which held those mobs on it for good.
+    size_t const mobs = party.size() > 1 ? OnParty(party) : on;
+    return mobs >= size_t(n) + party.size() - 1 || (on && bot->GetHealthPct() < sPlayerbotAIConfig.CriticalHealth);
 }
 
 bool FleeBackAction::isPossible() { return IsMovingAllowed(); }
@@ -258,7 +343,8 @@ bool FleeBackAction::Execute(Event /*event*/)
     }
 
     bool const fight = bot->IsInCombat();
-    Creature* const strong = fight ? StrongOn(botAI, bot) : StrongNear(botAI, bot);
+    std::vector<Player*> const party = Party(bot);
+    Creature* const strong = fight ? StrongOnParty(botAI, bot, party) : StrongNear(botAI, bot);
     if (fight && run.avoid)  // it stepped aside and was caught all the same: this is a flee from here
         run.avoid = false, run.until = 0;
 
@@ -285,8 +371,13 @@ bool FleeBackAction::Execute(Event /*event*/)
     // The oldest kept position far enough back that no other mob guards, else FleeManager's spot farthest from them
     // all. The spot taken and every newer one are dropped: they lie toward the pull, so the next leg goes on back or to
     // FleeManager, never forward again.
+    // In a group, a mate's standing call comes first: everyone runs to the caller's spot, so the group stays one
+    // group and nobody is left hitting the mobs that chase the others.
+    Call call;
+    bool const heeds = fight && party.size() > 1 && Called(bot, now, &call) && call.caller != g &&
+                       bot->GetExactDist2d(call.x, call.y) > 5.0f;
     size_t back = trail.size();
-    for (size_t i = 0; i < trail.size(); ++i)
+    for (size_t i = 0; !heeds && i < trail.size(); ++i)
     {
         float const d = bot->GetExactDist2d(trail[i]);
         if (d >= MIN_BACK && d <= MAX_BACK && Clear(botAI, bot, trail[i].GetPositionX(), trail[i].GetPositionY()))
@@ -305,11 +396,32 @@ bool FleeBackAction::Execute(Event /*event*/)
         kept.erase(kept.begin() + std::min(back, kept.size()), kept.end());
     }
 
-    if (back == trail.size() && !FleeManager(bot, RANGE, 0.0f, true).CalculateDestination(&x, &y, &z))
+    if (heeds)
+        x = call.x, y = call.y, z = call.z;
+    else if (back == trail.size() && !FleeManager(bot, RANGE, 0.0f, true).CalculateDestination(&x, &y, &z))
         return false;
 
     if (!MoveTo(bot->GetMapId(), x, y, z, false, false, false, false, MovementPriority::MOVEMENT_COMBAT))
         return false;
+
+    // The bot's own spot becomes its group's call when the reason is the group's: outnumbered together, or a strong
+    // mob on any of them. Critical health alone is one member stepping back while its mates finish the mob.
+    size_t const onParty = OnParty(party);
+    bool const calling = fight && party.size() > 1 && !heeds &&
+                         (strong || onParty >= size_t(Knob()) + party.size() - 1);
+    if (calling)
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        Call& mine = calls[bot->GetGroup()->GetGUID()];
+        bool const fresh = now >= mine.until;
+        if (fresh || mine.caller == g)
+        {
+            mine.x = x, mine.y = y, mine.z = z, mine.map = bot->GetMapId(), mine.until = now + KEEP_CALL, mine.caller = g;
+            if (fresh)
+                LOG_INFO("playerbots", "[flee] {} calls its group of {} here to flee {} mobs", bot->GetName(),
+                         party.size(), onParty);
+        }
+    }
 
     {
         Run next = run;
@@ -336,7 +448,8 @@ bool FleeBackAction::Execute(Event /*event*/)
                  back < trail.size() ? "where it came from" : "a scored spot", bot->GetExactDist2d(x, y));
     else if (now >= run.until)  // a new flee, not the next leg of one
         LOG_INFO("playerbots", "[flee] {} flees {} mobs at {:.0f}% hp to {} {:.0f} yd away{}{}", bot->GetName(), On(bot),
-                 bot->GetHealthPct(), back < trail.size() ? "where it came from" : "a scored spot",
+                 bot->GetHealthPct(),
+                 heeds ? "its group's spot" : back < trail.size() ? "where it came from" : "a scored spot",
                  bot->GetExactDist2d(x, y), strong ? ", from" : "", from);
 
     return true;
