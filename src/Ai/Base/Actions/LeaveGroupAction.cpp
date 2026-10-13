@@ -6,9 +6,11 @@
 
 #include "LeaveGroupAction.h"
 #include "Event.h"
+#include "GroupChat.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotTextMgr.h"
 #include "Playerbots.h"
+#include "RandomPlayerbotMgr.h"
 
 bool LeaveGroupAction::Execute(Event event)
 {
@@ -97,6 +99,14 @@ bool LeaveGroupAction::Leave()
 
 bool LeaveFarAwayAction::Execute(Event /*event*/)
 {
+    // agent-wow: why a random bot parted was nowhere; 32,000 joins a day ended and nothing said how
+    Player* leader = botAI->GetGroupLeader();
+    if (leader && GroupChat::Enabled() && sRandomPlayerbotMgr.IsRandomBot(bot))
+        LOG_INFO("playerbots", "[group] {} leaves its group: far away ({:.0f} yd and {} levels from {}{})",
+                 bot->GetName(), bot->GetMapId() == leader->GetMapId() ? bot->GetDistance2d(leader) : -1.0f,
+                 std::abs(int32(leader->GetLevel()) - int32(bot->GetLevel())), leader->GetName(),
+                 botAI->GetGrouperType() == GrouperType::SOLO ? ", a loner" : "");
+
     // allow bot to leave party when they want
     return Leave();
 }
@@ -152,6 +162,10 @@ bool LeaveFarAwayAction::isUseful()
 
     if (abs(int32(groupLeader->GetLevel() - bot->GetLevel())) > 4)
         return true;
+
+    // agent-wow: a bot that just joined on a quest's line is still walking over to its leader
+    if (GroupChat::Holds(bot))
+        return false;
 
     if (bot->GetMapId() != groupLeader->GetMapId() || bot->GetDistance2d(groupLeader) >= 2 * sPlayerbotAIConfig.RpgDistance)
     {

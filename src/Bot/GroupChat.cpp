@@ -47,9 +47,17 @@ struct Answered  // the answers a speaker's line got
     uint8 answers = 0;
 };
 
-struct Answer  // a bot's last answer: whose invite it accepts, and its cooldown
+struct Answer  // a bot's last answer: whose invite it accepts, for which quest, and its cooldown
 {
     ObjectGuid to;
+    time_t at = 0;
+    uint32 quest = 0;
+};
+
+struct Stay  // the group a bot joined on a quest's line: whose, for which quest, and when
+{
+    ObjectGuid leader;
+    uint32 quest = 0;
     time_t at = 0;
 };
 
@@ -58,11 +66,17 @@ std::map<ObjectGuid, std::vector<Heard>> inbox;
 std::map<ObjectGuid, Line> lines;
 std::map<ObjectGuid, Answered> answered;
 std::map<ObjectGuid, Answer> answers;
+std::map<ObjectGuid, Stay> stays;
 
 time_t const LINE_SECONDS = 180;
 time_t const ANSWER_COOLDOWN = 120;
 time_t const ACCEPT_SECONDS = 60;
 uint8 const ANSWERS_PER_LINE = 2;
+time_t const ARRIVE_SECONDS = 300;  // a joiner has this long to walk over before the leave for distance counts
+
+// Yards within which a bot answers a line: near enough to walk to the speaker. 0: anywhere in the zone, as before,
+// and nothing else of the hold below
+float Near() { return sConfigMgr->GetOption<float>("Playerbots.RandomBotGroupNear", 0.0f); }
 
 bool Form(std::string const& text, char const* form) { return text.rfind(form, 0) == 0; }
 
@@ -85,8 +99,17 @@ void AnswerLine(PlayerbotAI* botAI, Player* from, Quest const* quest)
     if (bot->GetZoneId() != from->GetZoneId() || std::abs(int32(bot->GetLevel()) - int32(from->GetLevel())) > 2)
         return;
 
+    // 15,437 joins on 2026-10-13 ended with the quest turned in while grouped 16 times: a bot answered from across
+    // the zone, and its own leave at 400 yd took it out before it could walk over.
+    float const near = Near();
+    if (near > 0.0f && (bot->GetMapId() != from->GetMapId() || bot->GetDistance2d(from) > near))
+        return;
+
+    // It holds the quest, or can take it: then only one its leader can share (Logan, 2026-10-13: not having the
+    // quest matters only when it isn't shareable)
     uint32 const id = quest->GetQuestId();
-    if (bot->GetQuestStatus(id) != QUEST_STATUS_INCOMPLETE && !bot->CanTakeQuest(quest, false))
+    bool const holds = bot->GetQuestStatus(id) == QUEST_STATUS_INCOMPLETE;
+    if (!holds && (!bot->CanTakeQuest(quest, false) || (near > 0.0f && !quest->HasFlag(QUEST_FLAGS_SHARABLE))))
         return;
 
     time_t const now = time(nullptr);
@@ -106,7 +129,7 @@ void AnswerLine(PlayerbotAI* botAI, Player* from, Quest const* quest)
             return;
 
         ++line.answers;
-        answers[bot->GetGUID()] = {from->GetGUID(), now};
+        answers[bot->GetGUID()] = {from->GetGUID(), now, id};
     }
 
     Whisper(botAI, from, quest);
@@ -144,7 +167,7 @@ void TakeAnswer(PlayerbotAI* botAI, Player* from, Quest const* quest)
         sent();
         {
             std::lock_guard<std::mutex> guard(lock);
-            answers[bot->GetGUID()] = {from->GetGUID(), now};
+            answers[bot->GetGUID()] = {from->GetGUID(), now, id};
         }
         LOG_INFO("playerbots", "[group] {} asks player {} to invite it for quest {}", bot->GetName(),
                  from->GetName(), id);
@@ -171,7 +194,39 @@ void TakeAnswer(PlayerbotAI* botAI, Player* from, Quest const* quest)
     sent();
     LOG_INFO("playerbots", "[group] {} invites {} for quest {}", bot->GetName(), from->GetName(), id);
 }
+
+// Joined on a quest's line: take the quest from the leader if the bot lacks it, and remember what the group is for
+void Joined(Player* bot, Answer const& answer)
+{
+    Quest const* quest = sObjectMgr->GetQuestTemplate(answer.quest);
+    Player* leader = ObjectAccessor::FindConnectedPlayer(answer.to);
+    if (!quest || !leader || Near() <= 0.0f)
+        return;
+
+    if (bot->GetQuestStatus(answer.quest) == QUEST_STATUS_NONE && quest->HasFlag(QUEST_FLAGS_SHARABLE) &&
+        leader->GetQuestStatus(answer.quest) == QUEST_STATUS_INCOMPLETE && bot->CanTakeQuest(quest, false) &&
+        bot->CanAddQuest(quest, false))
+    {
+        bot->AddQuestAndCheckCompletion(quest, leader);
+        LOG_INFO("playerbots", "[group] {} takes quest {} from {}", bot->GetName(), answer.quest, leader->GetName());
+    }
+
+    std::lock_guard<std::mutex> guard(lock);
+    stays[bot->GetGUID()] = {answer.to, answer.quest, time(nullptr)};
+}
 }  // namespace
+
+bool GroupChat::Holds(Player* bot)
+{
+    Group* group = bot->GetGroup();
+    if (!group || Near() <= 0.0f)
+        return false;
+
+    std::lock_guard<std::mutex> guard(lock);
+    auto stay = stays.find(bot->GetGUID());
+    return stay != stays.end() && stay->second.leader == group->GetLeaderGUID() &&
+           time(nullptr) < stay->second.at + ARRIVE_SECONDS;
+}
 
 bool GroupChat::Enabled() { return sConfigMgr->GetOption<bool>("Playerbots.RandomBotGroupChat", false); }
 
@@ -248,8 +303,32 @@ void GroupChat::Update(PlayerbotAI* botAI)
     if (Group* invite = bot->GetGroupInvite())
         if (invite->GetLeaderGUID() == pending.to && time(nullptr) < pending.at + ACCEPT_SECONDS &&
             botAI->DoSpecificAction("accept invitation", Event(), true) && bot->GetGroup())
+        {
             LOG_INFO("playerbots", "[group] {} joins the group of {}", bot->GetName(),
                      bot->GetGroup()->GetLeaderName());
+            Joined(bot, pending);
+        }
+
+    // What a stay was for, said once when it ends: the quest turned in or not, and how long together
+    if (!bot->GetGroup())
+    {
+        Stay stay;
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            auto it = stays.find(bot->GetGUID());
+            if (it != stays.end())
+            {
+                stay = it->second;
+                stays.erase(it);
+            }
+        }
+
+        if (stay.quest)
+            LOG_INFO("playerbots", "[group] {} is out of its group after {} s, quest {} {}", bot->GetName(),
+                     time(nullptr) - stay.at, stay.quest,
+                     bot->GetQuestRewardStatus(stay.quest) ? "turned in" :
+                     bot->GetQuestStatus(stay.quest) == QUEST_STATUS_COMPLETE ? "done, not turned in" : "not done");
+    }
 
     for (Heard const& line : heard)
     {

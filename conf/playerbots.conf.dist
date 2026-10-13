@@ -1380,6 +1380,14 @@ Playerbots.RandomBotGroupNearby = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotGroupChat = 0
 
+# A group formed in chat gets to its quest (agent-wow local patch). A bot answers a line only within this many yards
+# of the speaker, near enough to walk over; it answers for a quest it doesn't hold only when the quest can be shared,
+# and takes it from its leader on joining; and for its first 5 minutes in the group the leave for distance (400 yd)
+# doesn't count. Every leave says why in Playerbots.log. 0: a bot answers from anywhere in its zone, as before.
+# Read at every check.
+# Default: 0 (disabled)
+Playerbots.RandomBotGroupNear = 0
+
 # Random bots speak fixed forms a player can read and say back (agent-wow local patch):
 # "danger <mob>" when an elite or rare or a second mob comes on (party when grouped, else the zone's General),
 # "need heal" at critical health in a group, "going <place>" when the wander sets out (party only).
