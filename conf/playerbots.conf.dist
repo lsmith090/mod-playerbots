@@ -1397,6 +1397,13 @@ Playerbots.RandomBotSpeechGeneralMinutes = 10
 # Default: 0 (disabled)
 Playerbots.RandomBotFlee = 0
 
+# A flee is seen through (agent-wow local patch): once a random bot flees, it runs on while any mob is on it, its pet
+# called off, and after this many seconds with mobs still on it it turns and fights for the rest of that fight. A
+# mob gives up 11 s after it last took damage, so 20 leaves it time. A careless bot (RandomBotCarelessPercent) still
+# turns on the last mob as before. 0 keeps the flee as it was. Read at every check.
+# Default: 0 (disabled)
+Playerbots.RandomBotFleeCommit = 0
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a

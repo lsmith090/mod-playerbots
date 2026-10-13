@@ -11,9 +11,12 @@
 #include <map>
 #include <mutex>
 
+#include "BotTraits.h"
+#include "CharmInfo.h"
 #include "Config.h"
 #include "FleeManager.h"
 #include "MoveSpline.h"
+#include "Pet.h"
 #include "Playerbots.h"
 #include "RandomPlayerbotMgr.h"
 #include "TestBots.h"
@@ -24,6 +27,10 @@ struct Run  // where a flee is going, and until when it keeps that spot
 {
     float x = 0.0f, y = 0.0f, z = 0.0f;
     time_t until = 0;
+    time_t began = 0;     // when this fight's flee began
+    bool stood = false;   // it ran its time with mobs still on it and turned to fight: no more fleeing this fight
+    bool pet = false;     // its pet was called off for the run
+    ReactStates react = REACT_DEFENSIVE;  // and reacted like this before
 };
 
 std::mutex lock;  // bots of different maps update on different threads
@@ -38,6 +45,42 @@ float const MAX_BACK = 80.0f;   // nor one farther than this
 time_t const KEEP_RUN = 10;     // s a flee keeps its spot while running there
 
 int32 Knob() { return sConfigMgr->GetOption<int32>("Playerbots.RandomBotFlee", 0); }
+
+// Seconds a flee goes on with mobs still on the bot before it turns to fight; 0 keeps the flee as it was
+int32 Commit() { return sConfigMgr->GetOption<int32>("Playerbots.RandomBotFleeCommit", 0); }
+
+// A mob gives up 11 s after it last took damage, once 30 yd from home (Creature::CanCreatureAttack): a pet that goes
+// on biting holds every mob on the bot. Called off, it follows.
+void CallOff(Player* bot, Run& run)
+{
+    Pet* pet = bot->GetPet();
+    if (!pet || !pet->IsAlive())
+        return;
+
+    run.pet = true;
+    run.react = pet->GetReactState();
+    pet->SetReactState(REACT_PASSIVE);
+    pet->AttackStop();
+    if (CharmInfo* info = pet->GetCharmInfo())
+    {
+        info->SetPlayerReactState(REACT_PASSIVE);
+        info->SetIsCommandAttack(false);
+        info->SetCommandState(COMMAND_FOLLOW);
+    }
+
+    pet->GetMotionMaster()->MoveFollow(bot, PET_FOLLOW_DIST, pet->GetFollowAngle());
+}
+
+void CallBack(Player* bot, Run const& run)
+{
+    Pet* pet = bot->GetPet();
+    if (!run.pet || !pet)
+        return;
+
+    pet->SetReactState(run.react);
+    if (CharmInfo* info = pet->GetCharmInfo())
+        info->SetPlayerReactState(run.react);
+}
 
 // The mobs on the bot within range
 size_t On(Player* bot)
@@ -79,7 +122,9 @@ void FleeBack::Remember(Player* bot)
     auto run = runs.find(bot->GetGUID());
     if (run != runs.end())
     {
-        LOG_INFO("playerbots", "[flee] {} got away at {:.0f}% hp", bot->GetName(), bot->GetHealthPct());
+        LOG_INFO("playerbots", "[flee] {} {} at {:.0f}% hp", bot->GetName(),
+                 run->second.stood ? "fought it out" : "got away", bot->GetHealthPct());
+        CallBack(bot, run->second);
         runs.erase(run);
     }
 
@@ -102,6 +147,23 @@ bool FleeBackTrigger::IsActive()
         return false;  // a bot in a pilot's party stays with the pilot
 
     size_t const on = On(bot);
+    if (on && Commit() > 0)
+    {
+        bool const careless = BotTraits::Careless(bot);
+        std::lock_guard<std::mutex> guard(lock);
+        auto run = runs.find(bot->GetGUID());
+        if (run != runs.end() && run->second.began)
+        {
+            if (run->second.stood)
+                return false;
+
+            // A flee begun goes on while any mob is on the bot: turning on the last one, hurt, is how most flees
+            // died. A careless bot still does.
+            if (!careless)
+                return true;
+        }
+    }
+
     return on >= size_t(n) || (on && bot->GetHealthPct() < sPlayerbotAIConfig.CriticalHealth);
 }
 
@@ -119,6 +181,18 @@ bool FleeBackAction::Execute(Event /*event*/)
         if (it != runs.end())
             run = it->second;
         trail = trails[g];
+    }
+
+    // It has run long enough for any mob to give up, and they haven't: running on only takes hits in the back
+    int32 const commit = Commit();
+    if (commit > 0 && run.began && now - run.began >= commit)
+    {
+        LOG_INFO("playerbots", "[flee] {} turns to fight {} mobs at {:.0f}% hp after {} s", bot->GetName(), On(bot),
+                 bot->GetHealthPct(), now - run.began);
+        CallBack(bot, run);
+        std::lock_guard<std::mutex> guard(lock);
+        runs[g].stood = true;
+        return false;
     }
 
     // Still running to its spot: keep going
@@ -155,8 +229,17 @@ bool FleeBackAction::Execute(Event /*event*/)
         return false;
 
     {
+        Run next = run;
+        next.x = x, next.y = y, next.z = z, next.until = now + KEEP_RUN;
+        if (!next.began)
+        {
+            next.began = now;
+            if (commit > 0)
+                CallOff(bot, next);
+        }
+
         std::lock_guard<std::mutex> guard(lock);
-        runs[g] = {x, y, z, now + KEEP_RUN};
+        runs[g] = next;
     }
 
     if (now >= run.until)  // a new flee, not the next leg of one
