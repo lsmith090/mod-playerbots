@@ -37,6 +37,7 @@
 #include "RandomPlayerbotFactory.h"
 #include "ServerFacade.h"
 #include "SharedDefines.h"
+#include "Config.h"
 #include "GroupChat.h"
 #include "NewRpgErrandsAction.h"
 #include "TestBots.h"
@@ -1623,7 +1624,14 @@ bool RandomPlayerbotMgr::ProcessBot(Player* bot)
         {
             LOG_DEBUG("playerbots", "Bot #{} <{}>: teleport for level and refresh", botId, bot->GetName());
             Refresh(bot);
-            RandomTeleportForLevel(bot);
+            // agent-wow local patch (Logan, 2026-10-13): a random bot walks the world like everyone else. This
+            // teleport came round for every bot about every 2.6 hours (new rpg leaves the old travel target idle,
+            // so every bot is "idle"), taking it out of its group, off its quest and away from who it played beside.
+            // The refresh stays: until a bot pays for its own repairs it is what mends its gear.
+            if (sConfigMgr->GetOption<bool>("Playerbots.RandomBotPeriodicTeleport", true))
+                RandomTeleportForLevel(bot);
+            else
+                LOG_DEBUG("playerbots", "Bot #{} <{}>: refreshed where it stands", botId, bot->GetName());
             uint32 time = urand(sPlayerbotAIConfig.MinRandomBotTeleportInterval,
                                 sPlayerbotAIConfig.MaxRandomBotTeleportInterval);
             ScheduleTeleport(botId, time);

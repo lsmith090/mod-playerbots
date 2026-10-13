@@ -1590,6 +1590,14 @@ Playerbots.RandomBotEarnedGear = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotAuctionBuy = 0
 
+# The manager's periodic teleport of a random bot to a place for its level (agent-wow local patch). Every
+# MinRandomBotTeleportInterval to MaxRandomBotTeleportInterval seconds an idle bot is refreshed and teleported, and
+# under new rpg every bot is idle. 0 keeps the refresh and drops the teleport: the bot stays where it stands and
+# walks. The teleport at a level-up is Playerbots.AutoTeleportForLevel; the one at a randomize is unchanged.
+# Read at every check.
+# Default: 1 (teleport, as upstream)
+Playerbots.RandomBotPeriodicTeleport = 1
+
 # Control probability weights for RPG status of bots. Takes effect only when the status meets its premise.​
 # Sum of weights need not be 100. Set to 0 to disable the status.
 #
