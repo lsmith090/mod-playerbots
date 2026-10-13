@@ -1835,6 +1835,28 @@ void RandomPlayerbotMgr::Init()
     PlayerbotsDatabasePreparedStatement* stmt = PlayerbotsDatabase.GetPreparedStatement(PLAYERBOTS_DEL_RANDOM_BOTS_BY_EVENT);
     stmt->SetData(0, std::string("add"));
     PlayerbotsDatabase.DirectExecute(stmt);
+
+    // agent-wow local patch (#186): the delete above takes a test bot's "add" row with every random bot's, at every
+    // start. A testlogin is also kept as a "test" row, which gives the "add" row back here; the first tick's GetBots
+    // takes it into currentBots and the bot logs in. Only while its account is still a test account: emptying
+    // Playerbots.TestBotAccounts keeps them all out. The account is read from the database, not the character cache,
+    // so this doesn't depend on what the world has loaded by now.
+    stmt = PlayerbotsDatabase.GetPreparedStatement(PLAYERBOTS_SEL_RANDOM_BOTS_BY_OWNER_AND_EVENT);
+    stmt->SetData(0, 0);
+    stmt->SetData(1, "test");
+    if (PreparedQueryResult result = PlayerbotsDatabase.Query(stmt))
+    {
+        do
+        {
+            uint32 const bot = result->Fetch()[0].Get<uint32>();
+            QueryResult owner = CharacterDatabase.Query("SELECT account FROM characters WHERE guid = {}", bot);
+            if (!owner || !TestBots::IsTestAccount(owner->Fetch()[0].Get<uint32>()))
+                continue;
+
+            SetEventValue(bot, "add", 1, 31104000);
+            LOG_INFO("playerbots", "[testbots] bot {} stays logged in", bot);
+        } while (result->NextRow());
+    }
 }
 
 void RandomPlayerbotMgr::InitArenaTeams()
@@ -2584,8 +2606,8 @@ bool RandomPlayerbotMgr::HandlePlayerbotConsoleCommand(ChatHandler* /*handler*/,
     }
 
     // agent-wow local patch (#186): a GM logs a test bot in or out, or gives an online one an item; the manager never
-    // logs one in or out on its own. The "add" event lasts a year: a test bot stays in, across restarts too, until
-    // its testlogout.
+    // logs one in or out on its own. The "add" event lasts a year, and the "test" event never ends: Init() gives the
+    // "add" row back from it at every start, so a test bot stays in, across restarts too, until its testlogout.
     if (cmd.rfind("test", 0) == 0)
     {
         std::istringstream in(cmd);
@@ -2604,6 +2626,7 @@ bool RandomPlayerbotMgr::HandlePlayerbotConsoleCommand(ChatHandler* /*handler*/,
         if (verb == "testlogin")
         {
             sRandomPlayerbotMgr.SetEventValue(bot, "add", 1, 31104000);
+            sRandomPlayerbotMgr.SetEventValue(bot, "test", 1, 0);
             sRandomPlayerbotMgr.currentBots.insert(bot);
             if (!player)
                 sRandomPlayerbotMgr.AddPlayerBot(guid, 0);
@@ -2611,6 +2634,7 @@ bool RandomPlayerbotMgr::HandlePlayerbotConsoleCommand(ChatHandler* /*handler*/,
         else if (verb == "testlogout")
         {
             sRandomPlayerbotMgr.SetEventValue(bot, "add", 0, 0);
+            sRandomPlayerbotMgr.SetEventValue(bot, "test", 0, 0);
             sRandomPlayerbotMgr.currentBots.erase(bot);
             if (player)
                 sRandomPlayerbotMgr.LogoutPlayerBot(guid);
