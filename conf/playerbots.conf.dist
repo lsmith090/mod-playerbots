@@ -1397,6 +1397,21 @@ Playerbots.RandomBotSpeechGeneralMinutes = 10
 # Default: 0 (disabled)
 Playerbots.RandomBotFlee = 0
 
+# Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
+# swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
+# its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a
+# restart). 0 never surfaces: a bot under water for WaterBreath.Timer drowns.
+# Default: 0 (disabled)
+Playerbots.RandomBotSurfaceBreath = 0
+
+# Careless random bots (agent-wow local patch): this share of them, in percent, is careless for life (the trait is
+# read off the character's guid, so a bot is the same at every login). The first rule that reads it is the breath: a
+# careless bot swims up with RandomBotCarelessBreath seconds left whatever the depth, and in a fight only when its
+# breath is gone, so deep down or with a mob on it some drown, as players do.
+# Default: 0 (none), 8
+Playerbots.RandomBotCarelessPercent = 0
+Playerbots.RandomBotCarelessBreath = 8
+
 # Random bots answer other players' chat lines with free-text replies (agent-wow local patch). 0 stops the replies
 # only: RandomBotTalk's suggestions (what to do, craft) go on. Read at every line: a .reload config turns it on or off.
 # Default: 1 (enabled)

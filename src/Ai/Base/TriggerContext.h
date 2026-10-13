@@ -12,6 +12,7 @@
 #include "FishingTriggers.h"
 #include "GenericTriggers.h"
 #include "FleeBackAction.h"
+#include "SurfaceAction.h"
 #include "GuildTriggers.h"
 #include "HealthTriggers.h"
 #include "LfgTriggers.h"
@@ -150,6 +151,7 @@ public:
         creators["no food"] = &TriggerContext::no_food;
 
         creators["flee back"] = &TriggerContext::flee_back;  // agent-wow local patch
+        creators["out of breath"] = &TriggerContext::out_of_breath;  // agent-wow local patch
         creators["behind target"] = &TriggerContext::behind_target;
         creators["not behind target"] = &TriggerContext::not_behind_target;
         creators["not facing target"] = &TriggerContext::not_facing_target;
@@ -311,6 +313,7 @@ private:
     static Trigger* not_behind_target(PlayerbotAI* botAI) { return new IsNotBehindTargetTrigger(botAI); }
     static Trigger* not_facing_target(PlayerbotAI* botAI) { return new IsNotFacingTargetTrigger(botAI); }
     static Trigger* flee_back(PlayerbotAI* botAI) { return new FleeBackTrigger(botAI); }
+    static Trigger* out_of_breath(PlayerbotAI* botAI) { return new OutOfBreathTrigger(botAI); }
     static Trigger* no_drink(PlayerbotAI* botAI) { return new NoDrinkTrigger(botAI); }
     static Trigger* no_food(PlayerbotAI* botAI) { return new NoFoodTrigger(botAI); }
     static Trigger* LightAoe(PlayerbotAI* botAI) { return new LightAoeTrigger(botAI); }

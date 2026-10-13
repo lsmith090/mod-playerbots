@@ -42,4 +42,8 @@ void UsePotionsStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
     // Ice Block 90), above every rotation action: a bot under three mobs stood and fought until dead.
     triggers.push_back(
         new TriggerNode("flee back", { NextAction("flee back", ACTION_EMERGENCY - 1) }));
+    // agent-wow: a random bot under water with little breath left swims up (Playerbots.RandomBotSurfaceBreath),
+    // ahead of the potion: drowning takes a fifth of its health a second. The same in UseFoodStrategy, out of combat.
+    triggers.push_back(
+        new TriggerNode("out of breath", { NextAction("surface", ACTION_EMERGENCY + 3) }));
 }

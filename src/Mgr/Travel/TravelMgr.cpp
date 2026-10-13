@@ -18,6 +18,7 @@
 #include "PathGenerator.h"
 #include "Playerbots.h"
 #include "RaceMgr.h"
+#include "SurfaceAction.h"
 #include "Talentspec.h"
 #include "TransportMgr.h"
 #include "TravelNode.h"
@@ -4652,6 +4653,7 @@ void TravelMgr::PrepareDestinationCache()
     // Temporary map to group creatures by entry and area
     std::map<std::tuple<uint16, int32, int32, int32>, std::vector<CreatureData>> tempLocsCache;
     std::map<uint32, std::map<uint32, std::vector<WorldLocation>>> tempCreatureCache;
+    uint32 underWaterSpawns = 0;
     for (auto const& [guid, creatureData] : sObjectMgr->GetAllCreatureData())
     {
         CreatureTemplate const* creatureTemplate = sObjectMgr->GetCreatureTemplate(creatureData.id);
@@ -4696,7 +4698,12 @@ void TravelMgr::PrepareDestinationCache()
             int32 roundX = static_cast<int32>(std::lround(x / 50.0f));
             int32 roundY = static_cast<int32>(std::lround(y / 50.0f));
             int32 roundZ = static_cast<int32>(std::lround(z / 50.0f));
-            tempLocsCache[std::make_tuple(mapId, roundX, roundY, roundZ)].push_back(creatureData);
+            // agent-wow local patch (RandomBotSurfaceBreath): a spawn under water is in no grind cell. A bot sent to
+            // one walked the sea floor to it and drowned there (500 a week off Durotar's south coast).
+            if (Breath::Knob() > 0 && map->IsUnderWater(PHASEMASK_NORMAL, x, y, z, 2.0f))
+                ++underWaterSpawns;
+            else
+                tempLocsCache[std::make_tuple(mapId, roundX, roundY, roundZ)].push_back(creatureData);
             tempCreatureCache[templateEntry][areaId].push_back(WorldLocation(mapId, x, y, z));
         }
         // FLIGHT MASTERS
@@ -4813,6 +4820,9 @@ void TravelMgr::PrepareDestinationCache()
             bankerCount++;
         }
     }
+
+    if (underWaterSpawns)
+        LOG_INFO("playerbots", "[breath] {} spawns under water left out of the grind cells", underWaterSpawns);
 
     // Process temporary caches
     for (auto const& [gridTuple, creatureDataList] : tempLocsCache)

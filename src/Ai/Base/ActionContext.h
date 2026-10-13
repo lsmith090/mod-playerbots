@@ -44,6 +44,7 @@
 #include "MoveToTravelTargetAction.h"
 #include "MovementActions.h"
 #include "FleeBackAction.h"
+#include "SurfaceAction.h"
 #include "AuctionSellAction.h"
 #include "NewRpgProfessionAction.h"
 #include "NewRpgAction.h"
@@ -100,6 +101,7 @@ public:
         creators["reach party member to resurrect"] = &ActionContext::reach_party_member_to_resurrect;
         creators["flee"] = &ActionContext::flee;
         creators["flee back"] = &ActionContext::flee_back;  // agent-wow local patch
+        creators["surface"] = &ActionContext::surface;  // agent-wow local patch
         creators["flee with pet"] = &ActionContext::flee_with_pet;
         creators["avoid aoe"] = &ActionContext::avoid_aoe;
         creators["wake on combat start"] = &ActionContext::wake_on_combat_start;
@@ -324,6 +326,7 @@ private:
     static Action* reach_party_member_to_resurrect(PlayerbotAI* botAI) { return new ReachPartyMemberToResurrectAction(botAI); }
     static Action* flee(PlayerbotAI* botAI) { return new FleeAction(botAI); }
     static Action* flee_back(PlayerbotAI* botAI) { return new FleeBackAction(botAI); }
+    static Action* surface(PlayerbotAI* botAI) { return new SurfaceAction(botAI); }
     static Action* flee_with_pet(PlayerbotAI* botAI) { return new FleeWithPetAction(botAI); }
     static Action* avoid_aoe(PlayerbotAI* botAI) { return new AvoidAoeAction(botAI); }
     static Action* wake_on_combat_start(PlayerbotAI* botAI) { return new WakeOnCombatStartAction(botAI); }
