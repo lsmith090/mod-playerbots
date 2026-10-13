@@ -64,6 +64,26 @@ private:
 };
 
 // A random bot low on food or drink, between quests, is due to look for a vendor (agent-wow: RandomBotBuyFood)
+// agent-wow local patch (RandomBotEarnedGear): the bot's gear is worn and it may look for a repairer
+class RepairRunDueTrigger : public Trigger
+{
+public:
+    RepairRunDueTrigger(PlayerbotAI* botAI) : Trigger(botAI, "repair run due", 10) {}
+    bool IsActive() override;
+};
+
+// agent-wow local patch (RandomBotEarnedGear): the bot stands at a vendor or repairer its wander chose, once a visit
+class AtErrandVendorTrigger : public Trigger
+{
+public:
+    AtErrandVendorTrigger(PlayerbotAI* botAI) : Trigger(botAI, "at errand vendor") {}
+    bool IsActive() override;
+
+private:
+    ObjectGuid lastVendor;
+    uint32 lastVisitStart{0};
+};
+
 class FoodRunDueTrigger : public Trigger
 {
 public:

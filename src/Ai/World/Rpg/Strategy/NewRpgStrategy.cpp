@@ -100,6 +100,24 @@ void NewRpgStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
             }
         )
     );
+    // agent-wow local patch (RandomBotEarnedGear): a bot with worn gear sets out for a repairer, ahead of its food
+    // run, and at any vendor or repairer its wander reaches it sells its junk, repairs and buys what it can use
+    triggers.push_back(
+        new TriggerNode(
+            "repair run due",
+            {
+                NextAction("new rpg go repair", 3.7f)
+            }
+        )
+    );
+    triggers.push_back(
+        new TriggerNode(
+            "at errand vendor",
+            {
+                NextAction("vendor errands", 3.9f)
+            }
+        )
+    );
     triggers.push_back(
         new TriggerNode(
             "can craft for skill",

@@ -38,6 +38,7 @@
 #include "ServerFacade.h"
 #include "SharedDefines.h"
 #include "GroupChat.h"
+#include "NewRpgErrandsAction.h"
 #include "TestBots.h"
 #include "TravelMgr.h"
 #include "Unit.h"
@@ -2261,7 +2262,10 @@ void RandomPlayerbotMgr::Refresh(Player* bot)
 
     botAI->Reset();
 
-    bot->DurabilityRepairAll(false, 1.0f, false);
+    // agent-wow local patch (RandomBotEarnedGear): a refresh repairs nothing and adds no silver for a bot that earns
+    bool const earns = BotErrands::Earns(bot);
+    if (!earns)
+        bot->DurabilityRepairAll(false, 1.0f, false);
     bot->SetFullHealth();
     bot->SetPvP(sWorld->IsPvPRealm());
     PlayerbotFactory factory(bot, bot->GetLevel());
@@ -2274,7 +2278,8 @@ void RandomPlayerbotMgr::Refresh(Player* bot)
         bot->SetPower(POWER_ENERGY, bot->GetMaxPower(POWER_ENERGY));
 
     uint32 money = bot->GetMoney();
-    bot->SetMoney(money + 500 * sqrt(urand(1, bot->GetLevel() * 5)));
+    if (!earns)
+        bot->SetMoney(money + 500 * sqrt(urand(1, bot->GetLevel() * 5)));
 
     if (bot->GetGroup())
         botAI->LeaveOrDisbandGroup();

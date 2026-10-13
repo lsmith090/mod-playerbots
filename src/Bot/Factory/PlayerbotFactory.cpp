@@ -22,6 +22,7 @@
 #include "ItemVisitors.h"
 #include "Log.h"
 #include "LootMgr.h"
+#include "NewRpgErrandsAction.h"
 #include "NewRpgFoodAction.h"
 #include "ObjectMgr.h"
 #include "PerfMonitor.h"
@@ -1088,7 +1089,9 @@ void PlayerbotFactory::Randomize(bool incremental)
 
     pmo = sPerfMonitor.start(PERF_MON_RNDBOT, "PlayerbotFactory_Save");
     LOG_DEBUG("playerbots", "Saving to DB...");
-    bot->SetMoney(urand(level * 100000, level * 5 * 100000));
+    // agent-wow local patch (RandomBotEarnedGear): a random bot is handed no gold, 10 to 50 a level otherwise
+    if (!BotErrands::Earns(bot))
+        bot->SetMoney(urand(level * 100000, level * 5 * 100000));
     bot->SetHealth(bot->GetMaxHealth());
     bot->SetPower(POWER_MANA, bot->GetMaxPower(POWER_MANA));
     bot->SaveToDB(false, false);
@@ -1106,7 +1109,11 @@ void PlayerbotFactory::Refresh()
     //     InitEquipment(true);
     // }
     InitAttunementQuests();
-    ClearInventory();
+    // agent-wow local patch (RandomBotEarnedGear): the manager refreshes every bot each 1 to 5 hours (3,041 times on
+    // 2026-10-13, about every 2.6 h a bot), and this destroyed all it carried: its loot, what it bought, what it
+    // meant to list. A bot that earns keeps its bags.
+    if (!BotErrands::Earns(bot))
+        ClearInventory();
     InitAmmo();
     InitFood();
     InitReagents();
@@ -1128,11 +1135,13 @@ void PlayerbotFactory::Refresh()
     }
     if (bot->GetLevel() >= sPlayerbotAIConfig.MinEnchantingBotLevel)
         ApplyEnchantAndGemsNew();
-    bot->DurabilityRepairAll(false, 1.0f, false);
+    // agent-wow local patch (RandomBotEarnedGear): no free repair and no top-up for a random bot that earns its keep
+    if (!BotErrands::Earns(bot))
+        bot->DurabilityRepairAll(false, 1.0f, false);
     if (bot->isDead())
         bot->ResurrectPlayer(1.0f, false);
     uint32 money = urand(level * 1000, level * 5 * 1000);
-    if (bot->GetMoney() < money)
+    if (bot->GetMoney() < money && !BotErrands::Earns(bot))
         bot->SetMoney(money);
     // bot->SaveToDB(false, false);
 }

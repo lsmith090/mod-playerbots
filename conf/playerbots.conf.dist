@@ -1573,6 +1573,15 @@ Playerbots.RandomBotCraftForSkill = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotBuyFood = 0
 
+# Random bots earn their gold and their gear (agent-wow local patch). The factory hands a random bot no money (10 to
+# 50 gold a level otherwise) and repairs nothing for free. At any vendor or repairer its wander reaches, a bot sells
+# its junk, has its gear repaired and buys what it can use, from its own money; with its worst item under 30% of its
+# durability it walks to the nearest repairer. Set Playerbots.AutoUpgradeEquip = 0 with it, or the factory still
+# hands out an outfit at every level. The manager's refresh, every 1 to 5 hours, no longer empties such a bot's bags.
+# Read at every check.
+# Default: 0 (disabled)
+Playerbots.RandomBotEarnedGear = 0
+
 # Control probability weights for RPG status of bots. Takes effect only when the status meets its premise.​
 # Sum of weights need not be 100. Set to 0 to disable the status.
 #

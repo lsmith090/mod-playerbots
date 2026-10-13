@@ -6,6 +6,7 @@
 
 #include "NewRpgTriggers.h"
 #include "Config.h"
+#include "NewRpgErrandsAction.h"
 #include "NewRpgFoodAction.h"
 #include "NewRpgProfessionAction.h"
 #include "ObjectMgr.h"
@@ -112,6 +113,46 @@ bool AtVendorTrigger::IsActive()
     // reagents with RandomBotCraftForSkill, recipes with RandomBotEarnedProfessions
     if (!(EarnedProfessions::CraftEnabled(botAI) || EarnedProfessions::Enabled(botAI)) ||
         !bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_VENDOR))
+        return false;
+
+    lastVendor = visit->npcOrGo;
+    lastVisitStart = botAI->rpgInfo.startT;
+    return true;
+}
+
+bool RepairRunDueTrigger::IsActive()
+{
+    // not while questing, flying or already walking somewhere chosen
+    switch (botAI->rpgInfo.GetStatus())
+    {
+        case RPG_IDLE:
+        case RPG_WANDER_RANDOM:
+        case RPG_WANDER_NPC:
+        case RPG_GO_GRIND:
+        case RPG_REST:
+            break;
+        default:
+            return false;
+    }
+
+    // a repair costs money: with none there is nothing to walk for
+    return !bot->IsInCombat() && BotErrands::Enabled(botAI) && bot->GetMoney() > 0 &&
+           BotErrands::Worst(bot) < BotErrands::WORN &&
+           AI_VALUE2(time_t, "last said", BotErrands::NEXT_REPAIR_SEARCH) <= time(nullptr);
+}
+
+bool AtErrandVendorTrigger::IsActive()
+{
+    auto* visit = std::get_if<NewRpgInfo::WanderNpc>(&botAI->rpgInfo.data);
+    if (!visit || !visit->npcOrGo)
+        return false;
+
+    // one try per visit, whatever came of it
+    if (visit->npcOrGo == lastVendor && botAI->rpgInfo.startT == lastVisitStart)
+        return false;
+
+    if (!BotErrands::Enabled(botAI) ||
+        !bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_VENDOR | UNIT_NPC_FLAG_REPAIR))
         return false;
 
     lastVendor = visit->npcOrGo;
