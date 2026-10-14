@@ -46,6 +46,7 @@
 #include "FleeBackAction.h"
 #include "SurfaceAction.h"
 #include "AuctionSellAction.h"
+#include "FollowerQuestAction.h"
 #include "NewRpgAuctionAction.h"
 #include "NewRpgErrandsAction.h"
 #include "NewRpgFoodAction.h"
@@ -297,6 +298,7 @@ public:
         creators["ah buy"] = &ActionContext::ah_buy;  // agent-wow local patch
         creators["new rpg go mailbox"] = &ActionContext::new_rpg_go_mailbox;  // agent-wow local patch
         creators["take auction mail"] = &ActionContext::take_auction_mail;  // agent-wow local patch
+        creators["follower quest giver"] = &ActionContext::follower_quest_giver;  // agent-wow local patch
         creators["new rpg do quest"] = &ActionContext::new_rpg_do_quest;
         creators["new rpg travel flight"] = &ActionContext::new_rpg_travel_flight;
         creators["new rpg outdoor pvp"] = &ActionContext::new_rpg_outdoor_pvp;
@@ -517,6 +519,7 @@ private:
     static Action* ah_buy(PlayerbotAI* botAI) { return new AhBuyAction(botAI); }
     static Action* new_rpg_go_mailbox(PlayerbotAI* botAI) { return new NewRpgGoMailboxAction(botAI); }
     static Action* take_auction_mail(PlayerbotAI* botAI) { return new TakeAuctionMailAction(botAI); }
+    static Action* follower_quest_giver(PlayerbotAI* botAI) { return new FollowerQuestGiverAction(botAI); }
     static Action* learn_recipe(PlayerbotAI* botAI) { return new LearnRecipeAction(botAI); }
     static Action* new_rpg_do_quest(PlayerbotAI* botAI) { return new NewRpgDoQuestAction(botAI); }
     static Action* new_rpg_travel_flight(PlayerbotAI* botAI) { return new NewRpgTravelFlightAction(botAI); }

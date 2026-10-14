@@ -228,6 +228,12 @@ bool GroupChat::Holds(Player* bot)
            time(nullptr) < stay->second.at + ARRIVE_SECONDS;
 }
 
+bool GroupChat::Follows(Player* bot)
+{
+    Group* group = bot->GetGroup();
+    return group && Near() > 0.0f && Joins(bot) && group->GetLeaderGUID() != bot->GetGUID() && AllRandomBots(group);
+}
+
 bool GroupChat::Enabled() { return sConfigMgr->GetOption<bool>("Playerbots.RandomBotGroupChat", false); }
 
 bool GroupChat::AllRandomBots(Group* group)
@@ -392,4 +398,6 @@ bool GroupChat::Ask(PlayerbotAI* botAI)
 void BotGroupStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
 {
     triggers.push_back(new TriggerNode("random", { NextAction("leave far away", 4.0f) }));
+    // agent-wow: a follower of a bot leader accepts and turns in at quest givers itself (Playerbots.RandomBotGroupNear)
+    triggers.push_back(new TriggerNode("follower quest giver", { NextAction("follower quest giver", 4.0f) }));
 }

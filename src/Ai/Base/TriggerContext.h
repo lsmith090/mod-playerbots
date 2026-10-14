@@ -19,6 +19,7 @@
 #include "LootTriggers.h"
 #include "NamedObjectContext.h"
 #include "NewRpgStrategy.h"
+#include "FollowerQuestAction.h"
 #include "NewRpgTriggers.h"
 #include "PullTriggers.h"
 #include "PvpTriggers.h"
@@ -258,6 +259,7 @@ public:
         creators["at auctioneer to buy"] = &TriggerContext::at_auctioneer_to_buy;  // agent-wow local patch
         creators["mailbox run due"] = &TriggerContext::mailbox_run_due;  // agent-wow local patch
         creators["at mailbox"] = &TriggerContext::at_mailbox;  // agent-wow local patch
+        creators["follower quest giver"] = &TriggerContext::follower_quest_giver;  // agent-wow local patch
         creators["do quest status"] = &TriggerContext::do_quest_status;
         creators["travel flight status"] = &TriggerContext::travel_flight_status;
         creators["outdoor pvp status"] = &TriggerContext::outdoor_pvp_status;
@@ -485,6 +487,7 @@ private:
     static Trigger* at_auctioneer_to_buy(PlayerbotAI* botAI) { return new AtAuctioneerToBuyTrigger(botAI); }
     static Trigger* mailbox_run_due(PlayerbotAI* botAI) { return new MailboxRunDueTrigger(botAI); }
     static Trigger* at_mailbox(PlayerbotAI* botAI) { return new AtMailboxTrigger(botAI); }
+    static Trigger* follower_quest_giver(PlayerbotAI* botAI) { return new FollowerQuestGiverTrigger(botAI); }
     static Trigger* can_craft_for_skill(PlayerbotAI* botAI) { return new CraftForSkillTrigger(botAI); }
     static Trigger* learnable_recipe(PlayerbotAI* botAI) { return new LearnableRecipeTrigger(botAI); }
     static Trigger* do_quest_status(PlayerbotAI* botAI) { return new NewRpgStatusTrigger(botAI, RPG_DO_QUEST); }

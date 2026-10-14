@@ -50,6 +50,9 @@ bool CanOffer(PlayerbotAI* botAI);
 // The bot joined a group on a quest's line a moment ago and is still walking over: it doesn't leave for distance yet
 // (Playerbots.RandomBotGroupNear)
 bool Holds(Player* bot);
+
+// The bot follows another random bot in an all-bot group, and the group hold is on (Playerbots.RandomBotGroupNear)
+bool Follows(Player* bot);
 }  // namespace GroupChat
 
 // "bot group": a follower in an all-bot group leaves when it falls 5 levels apart or 400 yards away (leave far away).

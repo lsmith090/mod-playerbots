@@ -1383,7 +1383,9 @@ Playerbots.RandomBotGroupChat = 0
 # A group formed in chat gets to its quest (agent-wow local patch). A bot answers a line only within this many yards
 # of the speaker, near enough to walk over; it answers for a quest it doesn't hold only when the quest can be shared,
 # and takes it from its leader on joining; and for its first 5 minutes in the group the leave for distance (400 yd)
-# doesn't count. Every leave says why in Playerbots.log. 0: a bot answers from anywhere in its zone, as before.
+# doesn't count. A follower of a bot leader accepts and turns in at quest givers itself (it never did: its quest
+# strategy answers a master's game client, and a bot has none). Every leave says why in Playerbots.log. 0: a bot
+# answers from anywhere in its zone, as before.
 # Read at every check.
 # Default: 0 (disabled)
 Playerbots.RandomBotGroupNear = 0
