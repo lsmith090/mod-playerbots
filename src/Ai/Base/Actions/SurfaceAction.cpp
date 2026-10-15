@@ -7,6 +7,8 @@
 #include "SurfaceAction.h"
 
 #include <algorithm>
+#include <map>
+#include <mutex>
 
 #include "BotTraits.h"
 #include "Config.h"
@@ -18,11 +20,26 @@
 
 namespace
 {
-// "last said" holds the three numbers of the count (no new header for a timestamp): the seconds of breath used, when
-// the count was last brought up to date, and whether the bot is on its way up or catching its breath
-constexpr char const* USED = "breath used";
-constexpr char const* SEEN = "breath seen";
-constexpr char const* RISING = "breath rising";
+// Each bot's count: the seconds of breath used, when the count was last brought up to date, and whether the bot is on
+// its way up or catching its breath. Kept here, every number from zero: the "last said" value this was kept in starts
+// at its creation time less 120 s, so every bot began "rising" with 1.8 billion seconds used, and only a fight cleared
+// it (from 2026-10-14 08:05 UTC, when RandomBotSurfaceBreath went on, until a fight, every random bot stood still).
+struct Count
+{
+    time_t used = 0;
+    time_t seen = 0;
+    bool rising = false;
+};
+
+std::mutex lock;
+std::map<ObjectGuid, Count> counts;  // never pruned: three numbers per bot ever seen
+
+time_t Used(Player* bot)
+{
+    std::lock_guard<std::mutex> guard(lock);
+    auto count = counts.find(bot->GetGUID());
+    return count == counts.end() ? 0 : count->second.used;
+}
 
 // the seconds a bot can stay under water, as Player::getMaxTimer(BREATH_TIMER) has them
 time_t Lungs(Player* bot)
@@ -60,33 +77,32 @@ bool OutOfBreathTrigger::IsActive()
     if (margin <= 0 || !bot->IsAlive() || !sRandomPlayerbotMgr.IsRandomBot(bot))
         return false;
 
-    auto used = context->GetValue<time_t>("last said", USED);
-    auto seen = context->GetValue<time_t>("last said", SEEN);
-    auto rising = context->GetValue<time_t>("last said", RISING);
+    std::lock_guard<std::mutex> guard(lock);
+    Count& count = counts[bot->GetGUID()];
 
     time_t const now = time(nullptr);
-    time_t const passed = seen->Get() ? now - seen->Get() : 0;
-    seen->Set(now);
+    time_t const passed = count.seen ? now - count.seen : 0;
+    count.seen = now;
 
     bool const under = bot->IsUnderWater() && !bot->HasWaterBreathingAura();
     time_t const lungs = Lungs(bot);
     time_t const spent =
-        under ? std::min(lungs, used->Get() + passed) : std::max<time_t>(0, used->Get() - 10 * passed);
-    used->Set(spent);
+        under ? std::min(lungs, count.used + passed) : std::max<time_t>(0, count.used - 10 * passed);
+    count.used = spent;
 
-    if (under && (rising->Get() || lungs - spent <= LeavesAt(bot, margin)))
+    if (under && (count.rising || lungs - spent <= LeavesAt(bot, margin)))
     {
-        rising->Set(1);
+        count.rising = true;
         return true;
     }
 
-    if (!rising->Get())
+    if (!count.rising)
         return false;
 
     // up: in a fight it goes straight back to it; out of one it waits until half of what it may use is back
     if (bot->IsInCombat() || spent * 2 <= lungs - margin)
     {
-        rising->Set(0);
+        count.rising = false;
         return false;
     }
     return true;
@@ -112,7 +128,7 @@ bool SurfaceAction::Execute(Event /*event*/)
                MovementPriority::MOVEMENT_FORCED))
     {
         LOG_INFO("playerbots", "[breath] {} swims up {:.0f} yd for air with {} s of breath left{}{}", bot->GetName(),
-                 depth, Lungs(bot) - AI_VALUE2(time_t, "last said", USED), bot->IsInCombat() ? ", in a fight" : "",
+                 depth, Lungs(bot) - Used(bot), bot->IsInCombat() ? ", in a fight" : "",
                  BotTraits::Careless(bot) ? ", careless" : "");
         return true;
     }
