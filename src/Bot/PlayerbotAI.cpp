@@ -4704,7 +4704,10 @@ uint32 PlayerbotAI::GetFixedBotNumber(uint32 maxNum)
     if (maxNum == 0)
         return 0;
 
-    // Deterministic pseudo-random hash based on the bot GUID evenly distributed across active slots
+    // Deterministic pseudo-random hash based on the bot GUID.
+    // agent-wow: the guid alone, no time slot. With the slot mixed in, every 30 s each bot drew its grouper type again,
+    // so a member turned SOLO a fifth of the time and left its group at once (a median stay of 167 s, #1271). Our
+    // BotActiveAlone = 100 keeps every bot active, so the activity rotation the slot was for does nothing here.
     uint32 id = bot->GetGUID().GetCounter();
     uint32 h = id;
     h ^= h >> 16;
@@ -4713,13 +4716,7 @@ uint32 PlayerbotAI::GetFixedBotNumber(uint32 maxNum)
     h *= 0x846ca68b;
     h ^= h >> 16;
 
-    // Current time slot
-    uint32 timeSlot = (getMSTime() / 1000) / sPlayerbotAIConfig.BotActiveAloneDurationSeconds;
-
-    // Mix timeSlot into the hash to reshuffle every rotation window
-    uint32 mixed = h ^ (timeSlot * 0x9e3779b9);  // with multiplicative constant
-
-    return mixed % maxNum;
+    return h % maxNum;
 }
 
 /*

@@ -45,6 +45,9 @@ public:
 
     bool Execute(Event event) override;
     bool isUseful() override;
+
+private:
+    char const* why = "";  // agent-wow: the rule that made isUseful true, for the leave line (#1271)
 };
 
 #endif

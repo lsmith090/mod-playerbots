@@ -102,10 +102,9 @@ bool LeaveFarAwayAction::Execute(Event /*event*/)
     // agent-wow: why a random bot parted was nowhere; 32,000 joins a day ended and nothing said how
     Player* leader = botAI->GetGroupLeader();
     if (leader && GroupChat::Enabled() && sRandomPlayerbotMgr.IsRandomBot(bot))
-        LOG_INFO("playerbots", "[group] {} leaves its group: far away ({:.0f} yd and {} levels from {}{})",
-                 bot->GetName(), bot->GetMapId() == leader->GetMapId() ? bot->GetDistance2d(leader) : -1.0f,
-                 std::abs(int32(leader->GetLevel()) - int32(bot->GetLevel())), leader->GetName(),
-                 botAI->GetGrouperType() == GrouperType::SOLO ? ", a loner" : "");
+        LOG_INFO("playerbots", "[group] {} leaves its group: {} ({:.0f} yd and {} levels from {})", bot->GetName(), why,
+                 bot->GetMapId() == leader->GetMapId() ? bot->GetDistance2d(leader) : -1.0f,
+                 std::abs(int32(leader->GetLevel()) - int32(bot->GetLevel())), leader->GetName());
 
     // allow bot to leave party when they want
     return Leave();
@@ -141,15 +140,24 @@ bool LeaveFarAwayAction::isUseful()
         return false;
 
     if (botAI->GetGrouperType() == GrouperType::SOLO)
+    {
+        why = "a loner";
         return true;
+    }
 
     uint32 dCount = AI_VALUE(uint32, "death count");
 
     if (dCount > 9)
+    {
+        why = "too many deaths";
         return true;
+    }
 
     if (dCount > 4 && !botAI->HasGameClientMaster())
+    {
+        why = "too many deaths";
         return true;
+    }
 
     if (bot->GetGuildId() == groupLeader->GetGuildId())
     {
@@ -161,7 +169,10 @@ bool LeaveFarAwayAction::isUseful()
     }
 
     if (abs(int32(groupLeader->GetLevel() - bot->GetLevel())) > 4)
+    {
+        why = "levels apart";
         return true;
+    }
 
     // agent-wow: a bot that just joined on a quest's line is still walking over to its leader
     if (GroupChat::Holds(bot))
@@ -169,6 +180,7 @@ bool LeaveFarAwayAction::isUseful()
 
     if (bot->GetMapId() != groupLeader->GetMapId() || bot->GetDistance2d(groupLeader) >= 2 * sPlayerbotAIConfig.RpgDistance)
     {
+        why = "far away";
         return true;
     }
 
