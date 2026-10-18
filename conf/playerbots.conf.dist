@@ -1401,6 +1401,11 @@ Playerbots.RandomBotSpeechForms = 0
 # Default: 10
 Playerbots.RandomBotSpeechGeneralMinutes = 10
 
+# Random bots say "danger <mob>" at all (party and General); needs RandomBotSpeechForms = 1. The reactions to a heard
+# danger stay on either way; need heal and going are not gated by this.
+# Default: 0 (disabled)
+Playerbots.RandomBotSpeechDanger = 0
+
 # Random bots run back the way they came (agent-wow local patch): with this many mobs or more on a bot within 30 yd,
 # or at critical health with a mob on it and no potion it can drink now. 0 never flees. Read at every check: a
 # .reload config turns it on or off.

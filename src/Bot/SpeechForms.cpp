@@ -77,6 +77,9 @@ void Party(Player* bot, std::string const& text)
 
 void Danger(PlayerbotAI* botAI, Creature* mob)
 {
+    if (!sConfigMgr->GetOption<bool>("Playerbots.RandomBotSpeechDanger", false))
+        return;
+
     Player* bot = botAI->GetBot();
     std::string const text = "danger " + mob->GetName();
     if (bot->GetGroup())
