@@ -14,6 +14,7 @@
 #include "CraftServiceAction.h"
 #include "GroupChat.h"
 #include "SpeechForms.h"
+#include "FightStart.h"
 #include "FleeBackAction.h"
 #include "Common.h"
 #include "CreatureData.h"
@@ -642,6 +643,7 @@ void PlayerbotAI::HandleCommands()
     GroupChat::Update(this);  // agent-wow local patch (#291)
     SpeechForms::Update(this);  // agent-wow local patch: danger, need heal
     FleeBack::Remember(bot);    // agent-wow local patch: the way back for a flee
+    FightStart::Update(this);   // agent-wow local patch: a random bot's first seconds in a fight
 
     for (auto it = chatCommands.begin(); it != chatCommands.end();)
     {
