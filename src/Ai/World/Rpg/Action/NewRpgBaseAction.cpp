@@ -5,6 +5,13 @@
  */
 
 #include "NewRpgBaseAction.h"
+
+#include <algorithm>
+#include <ctime>
+#include <map>
+#include <mutex>
+#include <vector>
+
 #include "BroadcastHelper.h"
 #include "ChatHelper.h"
 #include "Creature.h"
@@ -27,6 +34,7 @@
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotTextMgr.h"
 #include "Playerbots.h"
+#include "FleeBackAction.h"
 #include "Position.h"
 #include "QuestDef.h"
 #include "QuestPackets.h"
@@ -38,6 +46,42 @@
 #include "Timer.h"
 #include "TravelMgr.h"
 #include "G3D/Vector2.h"
+
+namespace
+{
+std::mutex pathLock;  // bots of different maps update on different threads
+std::map<ObjectGuid, time_t> pathLogged;  // ponytail: never pruned; one time_t per bot ever seen
+
+// agent-wow: the first mob that would aggro the bot on a walk through these points (Playerbots.RandomBotPathDanger).
+// The walk is sampled every 8 yd for its first 120 yd: farther than that the bot sees nothing. A bot that already
+// stands where a mob would aggro it is left to the flee.
+Creature* DangerOnWalk(PlayerbotAI* botAI, Player* bot, std::vector<G3D::Vector3> const& points)
+{
+    float const step = 8.0f, horizon = 120.0f;
+    if (FleeBack::Aggro(botAI, bot, bot->GetPositionX(), bot->GetPositionY()))
+        return nullptr;
+
+    G3D::Vector3 from(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ());
+    float walked = 0.0f;
+    for (G3D::Vector3 const& to : points)
+    {
+        float const len = (to - from).magnitude();
+        for (float d = step; d < len + step && walked + d < horizon + step; d += step)
+        {
+            G3D::Vector3 const at = from + (to - from) * (std::min(d, len) / std::max(len, 0.01f));
+            if (Creature* mob = FleeBack::Aggro(botAI, bot, at.x, at.y))
+                return mob;
+        }
+
+        walked += len;
+        from = to;
+        if (walked >= horizon)
+            break;
+    }
+
+    return nullptr;
+}
+}  // namespace
 
 bool NewRpgBaseAction::MoveFarTo(WorldPosition dest)
 {
@@ -63,6 +107,44 @@ bool NewRpgBaseAction::MoveFarTo(WorldPosition dest)
     {
         return false;
     }
+
+    // agent-wow: a walk through a mob that would aggro the bot is held, not walked (Playerbots.RandomBotPathDanger
+    // levels, RandomBotPathDangerHold seconds; hold 0 only logs). The bot waits where it stands and tries again: a
+    // patrol passes, a pack despawns. Held before the stuck check below, so waiting never counts as no progress.
+    int32 const dangerLevels = sConfigMgr->GetOption<int32>("Playerbots.RandomBotPathDanger", 0);
+    auto held = [&](std::vector<G3D::Vector3> const& points)
+    {
+        if (dangerLevels <= 0 || bot->IsInCombat())
+            return false;
+
+        Creature* mob = DangerOnWalk(botAI, bot, points);
+        if (!mob)
+            return false;
+
+        int32 const hold = sConfigMgr->GetOption<int32>("Playerbots.RandomBotPathDangerHold", 0);
+        time_t const now = time(nullptr);
+        {
+            std::lock_guard<std::mutex> guard(pathLock);
+            time_t& last = pathLogged[bot->GetGUID()];
+            if (now - last >= std::max(hold, 30))
+            {
+                last = now;
+                LOG_INFO("playerbots", "[path] {} {} on its way to {:.0f}, {:.0f}: {} (L{}{}) {:.0f} yd off would aggro it",
+                         bot->GetName(), hold > 0 ? "holds" : "would hold", dest.GetPositionX(), dest.GetPositionY(),
+                         mob->GetName(), mob->GetLevel(),
+                         mob->GetCreatureTemplate()->rank > CREATURE_ELITE_NORMAL ? " elite" : "", bot->GetDistance(mob));
+            }
+        }
+
+        if (hold <= 0)
+            return false;
+
+        bot->StopMoving();
+        ForceToWait(uint32(hold) * IN_MILLISECONDS);
+        botAI->rpgInfo.stuckTs = getMSTime();
+        botAI->rpgInfo.stuckAttempts = 0;
+        return true;
+    };
 
     // Let previously committed movement finish before recomputing.
     //
@@ -93,8 +175,12 @@ bool NewRpgBaseAction::MoveFarTo(WorldPosition dest)
         if (bot->isMoving() && lastMove.lastMoveToMapId == bot->GetMapId())
         {
             float remaining = bot->GetExactDist(lastMove.lastMoveToX, lastMove.lastMoveToY, lastMove.lastMoveToZ);
+            // ponytail: a straight line to the committed point, not its spline's bends
             if (remaining > 10.0f)
+            {
+                held({G3D::Vector3(lastMove.lastMoveToX, lastMove.lastMoveToY, lastMove.lastMoveToZ)});
                 return true;
+            }
         }
     }
 
@@ -132,6 +218,9 @@ bool NewRpgBaseAction::MoveFarTo(WorldPosition dest)
     float dis = bot->GetExactDist(dest);
     if (dis < pathFinderDis)
     {
+        if (held({G3D::Vector3(dest.GetPositionX(), dest.GetPositionY(), dest.GetPositionZ())}))
+            return true;
+
         return MoveTo(dest.GetMapId(), dest.GetPositionX(), dest.GetPositionY(), dest.GetPositionZ(), false, false,
                       false, true);
     }
@@ -164,6 +253,9 @@ bool NewRpgBaseAction::MoveFarTo(WorldPosition dest)
             float endDistToDest = dest.GetExactDist(endPos.x, endPos.y, endPos.z);
             if (endDistToDest + 5.0f < disToDest)
             {
+                if (held(path.GetPath()))
+                    return true;
+
                 return MoveTo(bot->GetMapId(), endPos.x, endPos.y, endPos.z, false, false, false, true);
             }
         }

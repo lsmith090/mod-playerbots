@@ -234,6 +234,28 @@ Creature* StrongNear(PlayerbotAI* botAI, Player* bot)
 }
 }  // namespace
 
+Creature* FleeBack::Aggro(PlayerbotAI* botAI, Player* bot, float x, float y)
+{
+    int32 const levels = sConfigMgr->GetOption<int32>("Playerbots.RandomBotPathDanger", 0);
+    if (levels <= 0 || Knob() <= 0 || !sRandomPlayerbotMgr.IsRandomBot(bot) || TestBots::IsTestBot(bot) ||
+        bot->GetMap()->Instanceable() || bot->InBattleground() || !botAI->GetRealPlayersInGroup().empty() ||
+        BotTraits::Careless(bot))
+        return nullptr;
+
+    for (ObjectGuid const guid : botAI->GetAiObjectContext()->GetValue<GuidVector>("possible targets no los")->Get())
+    {
+        Creature* mob = botAI->GetCreature(guid);
+        if (!mob || !mob->IsAlive() || mob->GetVictim() == bot || mob->GetOwnerGUID() || !mob->IsHostileTo(bot))
+            continue;
+
+        if (mob->GetDistance2d(x, y) < mob->GetAttackDistance(bot) + 5.0f &&
+            (int32(mob->GetLevel()) - int32(bot->GetLevel()) >= levels || Strong(botAI, bot, mob)))
+            return mob;
+    }
+
+    return nullptr;
+}
+
 void FleeBack::Remember(Player* bot)
 {
     if (bot->IsInCombat() || !bot->IsAlive() || bot->IsInFlight() || bot->GetTransport() || Knob() <= 0 ||
