@@ -36,7 +36,7 @@ std::map<ObjectGuid, Adverts> adverts;  // by bot
 time_t factionPosted[3] = {0, 0, 0};    // by TeamId: one LFW per faction per RandomBotCraftAdvertGap
 
 uint32 const crafts[] = {SKILL_ALCHEMY,        SKILL_BLACKSMITHING, SKILL_ENCHANTING,    SKILL_ENGINEERING,
-                         SKILL_LEATHERWORKING, SKILL_TAILORING,     SKILL_JEWELCRAFTING, SKILL_INSCRIPTION};
+                         SKILL_LEATHERWORKING, SKILL_TAILORING};
 
 bool IsCraft(uint32 skill) { return std::find(std::begin(crafts), std::end(crafts), skill) != std::end(crafts); }
 
@@ -81,10 +81,6 @@ std::map<std::string, uint32> const professions = {
     {"leatherworker", SKILL_LEATHERWORKING},
     {"tailoring", SKILL_TAILORING},
     {"tailor", SKILL_TAILORING},
-    {"jewelcrafting", SKILL_JEWELCRAFTING},
-    {"jewelcrafter", SKILL_JEWELCRAFTING},
-    {"inscription", SKILL_INSCRIPTION},
-    {"scribe", SKILL_INSCRIPTION},
 };
 
 std::string Lower(std::string text)

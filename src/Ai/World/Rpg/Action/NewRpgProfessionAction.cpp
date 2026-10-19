@@ -24,8 +24,7 @@ namespace
 {
 constexpr uint16 TRADE_SKILLS[] = {SKILL_ALCHEMY,     SKILL_BLACKSMITHING, SKILL_COOKING,       SKILL_ENCHANTING,
                                    SKILL_ENGINEERING, SKILL_FIRST_AID,     SKILL_FISHING,       SKILL_HERBALISM,
-                                   SKILL_INSCRIPTION, SKILL_JEWELCRAFTING, SKILL_LEATHERWORKING, SKILL_MINING,
-                                   SKILL_SKINNING,    SKILL_TAILORING};
+                                   SKILL_LEATHERWORKING, SKILL_MINING,     SKILL_SKINNING,      SKILL_TAILORING};
 
 struct TrainerSpawn
 {
