@@ -25,6 +25,7 @@
 #include "PlayerbotGuildMgr.h"
 #include "PlayerbotSpellRepository.h"
 #include "PlayerbotWorldThreadProcessor.h"
+#include "QuestGate.h"
 #include "RandomPlayerbotMgr.h"
 #include "ScriptMgr.h"
 #include "ServerScript.h"
@@ -538,6 +539,10 @@ public:
 
         LOG_INFO("server.loading", "Loading gather node index...");
         GatherNodeMgr::instance().Load();
+
+        // agent-wow local patch: the quest gate's item read starts now, on its own thread, before a bot reaches it
+        if (sConfigMgr->GetOption<int32>("Playerbots.RandomBotQuestGate", 0) > 0)
+            LoadQuestGateItems();
 
         LOG_INFO("server.loading", "Playerbots World Thread Processor initialized");
     }

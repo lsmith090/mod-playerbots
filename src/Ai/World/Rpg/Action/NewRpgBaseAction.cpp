@@ -7,10 +7,12 @@
 #include "NewRpgBaseAction.h"
 
 #include <algorithm>
+#include <atomic>
 #include <ctime>
 #include <map>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -41,6 +43,7 @@
 #include "FleeBackAction.h"
 #include "Position.h"
 #include "QuestDef.h"
+#include "QuestGate.h"
 #include "QuestPackets.h"
 #include "Random.h"
 #include "RandomPlayerbotMgr.h"
@@ -96,30 +99,28 @@ struct Source
     bool normal = false;    // has a rank-0 dropper
 };
 
-std::unordered_map<uint32, Source> const& ItemSources()
-{
-    // Items quests ask for, by the creatures that drop them. Loaded at first use, once: the lowest-level normal
-    // dropper is the one a bot may pick; an item only elites drop is an elite quest for a solo bot.
-    static std::unordered_map<uint32, Source> sources;
-    static std::once_flag once;
-    std::call_once(once, []
-    {
-        // The quest items as a derived table, joined: MySQL materializes it once (0.15-0.25 s on the live world, 1,911
-        // items). An `IN (SELECT ... UNION ...)` ran as a dependent subquery per loot row and held the world for 5 min
-        // on 2026-10-19.
-        QueryResult result = WorldDatabase.Query(
-            "SELECT l.Item, MIN(IF(ct.`rank` = 0, ct.minlevel, 255)), MAX(ct.`rank` = 0) FROM ("
-            "SELECT RequiredItemId1 AS Item FROM quest_template WHERE RequiredItemId1 > 0 "
-            "UNION SELECT RequiredItemId2 FROM quest_template WHERE RequiredItemId2 > 0 "
-            "UNION SELECT RequiredItemId3 FROM quest_template WHERE RequiredItemId3 > 0 "
-            "UNION SELECT RequiredItemId4 FROM quest_template WHERE RequiredItemId4 > 0 "
-            "UNION SELECT RequiredItemId5 FROM quest_template WHERE RequiredItemId5 > 0 "
-            "UNION SELECT RequiredItemId6 FROM quest_template WHERE RequiredItemId6 > 0) q "
-            "JOIN creature_loot_template l ON l.Item = q.Item JOIN creature_template ct ON ct.lootid = l.Entry "
-            "GROUP BY l.Item");
-        if (!result)
-            return;
+std::atomic<bool> sourcesReady{false};
+std::unordered_map<uint32, Source> sources;  // written once, by the read's thread, before sourcesReady
 
+// Items quests ask for, by the creatures that drop them: the lowest-level normal dropper is the one a bot may pick; an
+// item only elites drop is an elite quest for a solo bot. The quest items are a derived table, joined: MySQL
+// materializes it once (0.15 s on the live world, 1,911 items), where an `IN (SELECT ... UNION ...)` ran once per loot
+// row. MAX_EXECUTION_TIME ends the read after 10 s whatever its plan.
+void ReadQuestGateItems()
+{
+    uint32 const start = getMSTime();
+    QueryResult result = WorldDatabase.Query(
+        "SELECT /*+ MAX_EXECUTION_TIME(10000) */ l.Item, MIN(IF(ct.`rank` = 0, ct.minlevel, 255)), MAX(ct.`rank` = 0) "
+        "FROM (SELECT RequiredItemId1 AS Item FROM quest_template WHERE RequiredItemId1 > 0 "
+        "UNION SELECT RequiredItemId2 FROM quest_template WHERE RequiredItemId2 > 0 "
+        "UNION SELECT RequiredItemId3 FROM quest_template WHERE RequiredItemId3 > 0 "
+        "UNION SELECT RequiredItemId4 FROM quest_template WHERE RequiredItemId4 > 0 "
+        "UNION SELECT RequiredItemId5 FROM quest_template WHERE RequiredItemId5 > 0 "
+        "UNION SELECT RequiredItemId6 FROM quest_template WHERE RequiredItemId6 > 0) q "
+        "JOIN creature_loot_template l ON l.Item = q.Item JOIN creature_template ct ON ct.lootid = l.Entry "
+        "GROUP BY l.Item");
+    if (result)
+    {
         do
         {
             Field* fields = result->Fetch();
@@ -127,8 +128,18 @@ std::unordered_map<uint32, Source> const& ItemSources()
             source.normalMin = fields[1].Get<uint8>();
             source.normal = fields[2].Get<uint8>() != 0;
         } while (result->NextRow());
-    });
-    return sources;
+    }
+
+    LOG_INFO("playerbots", "[quest] item sources: {} items in {} ms{}", sources.size(), GetMSTimeDiffToNow(start),
+             result ? "" : "; the read failed, so items hold no quest back");
+    sourcesReady.store(true, std::memory_order_release);
+}
+
+// The items once read, or nullptr while the read runs
+std::unordered_map<uint32, Source> const* ItemSources()
+{
+    LoadQuestGateItems();
+    return sourcesReady.load(std::memory_order_acquire) ? &sources : nullptr;
 }
 
 std::mutex gateLock;  // bots of different maps update on different threads
@@ -162,11 +173,11 @@ std::string QuestGate(Player* bot, PlayerbotAI* botAI, Quest const* quest)
             return ct->Name + " (elite)";
     }
 
-    auto const& sources = ItemSources();
-    for (uint8 i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i)
+    auto const* items = ItemSources();
+    for (uint8 i = 0; items && i < QUEST_ITEM_OBJECTIVES_COUNT; ++i)
     {
-        auto it = quest->RequiredItemId[i] ? sources.find(quest->RequiredItemId[i]) : sources.end();
-        if (it == sources.end())
+        auto it = quest->RequiredItemId[i] ? items->find(quest->RequiredItemId[i]) : items->end();
+        if (it == items->end())
             continue;
 
         if (it->second.normal ? int32(it->second.normalMin) - int32(bot->GetLevel()) >= levels : solo)
@@ -200,6 +211,13 @@ bool QuestGated(Player* bot, PlayerbotAI* botAI, Quest const* quest, char const*
     return sConfigMgr->GetOption<bool>("Playerbots.RandomBotQuestGateAct", false);
 }
 }  // namespace
+
+void LoadQuestGateItems()
+{
+    // ponytail: a detached thread; a worldserver stopping within the read's 0.2 s may meet a closed pool
+    static std::once_flag once;
+    std::call_once(once, [] { std::thread(ReadQuestGateItems).detach(); });
+}
 
 bool NewRpgBaseAction::MoveFarTo(WorldPosition dest)
 {
