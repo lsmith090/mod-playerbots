@@ -5,8 +5,10 @@
  */
 
 #include "NonCombatActions.h"
+#include "Config.h"
 #include "Event.h"
 #include "Playerbots.h"
+#include "RandomPlayerbotMgr.h"
 
 namespace
 {
@@ -133,8 +135,15 @@ bool EatAction::Execute(Event event)
 
 bool EatAction::isUseful()
 {
-    return UseItemAction::isUseful() &&
-           AI_VALUE2(uint8, "health", "self target") < sPlayerbotAIConfig.LowHealth;
+    // agent-wow (RandomBotRestHealth): a random bot with no master eats below this many percent of health, as
+    // DrinkAction drinks below 85% of mana. The grind strategy's default "food" (4.1) already beats the grind pull
+    // (4.0), so this line is the only thing that decided when a bot rests, and it was 45%: a bot at 46% pulled.
+    int32 limit = sPlayerbotAIConfig.LowHealth;
+    int32 const rest = sConfigMgr->GetOption<int32>("Playerbots.RandomBotRestHealth", 0);
+    if (rest > 0 && !botAI->GetMaster() && sRandomPlayerbotMgr.IsRandomBot(bot))
+        limit = std::max(limit, std::min(rest, 99));
+
+    return UseItemAction::isUseful() && AI_VALUE2(uint8, "health", "self target") < limit;
 }
 
 bool EatAction::isPossible()
