@@ -1491,6 +1491,16 @@ Playerbots.RandomBotLearnedDangerDays = 3
 # Default: 0 (log only)
 Playerbots.RandomBotLearnedDangerAct = 0
 
+# A random bot's walk is held where it stands when a mob this many levels or more above it, or one strong for it,
+# would aggro it on the next 120 yd of the way (agent-wow local patch). 0: off.
+# Default: 0 (disabled)
+Playerbots.RandomBotPathDanger = 0
+
+# Seconds a RandomBotPathDanger hold waits before the bot tries again. 0: it only logs a [path] line, at most once per
+# bot per 30 s, and walks on.
+# Default: 0 (log only)
+Playerbots.RandomBotPathDangerHold = 0
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a

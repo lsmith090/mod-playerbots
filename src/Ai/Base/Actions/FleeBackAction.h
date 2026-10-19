@@ -10,6 +10,7 @@
 #include "MovementActions.h"
 #include "Trigger.h"
 
+class Creature;
 class Player;
 class PlayerbotAI;
 
@@ -21,6 +22,12 @@ namespace FleeBack
 {
 // Out of combat, at the bot's update: keep its last few positions, and log a flee that got away
 void Remember(Player* bot);
+
+// A mob that would aggro the bot at (x, y): one the bot can see, hostile, alive, not on the bot, standing within its
+// attack distance + 5 yd of the spot, that is Playerbots.RandomBotPathDanger or more levels above the bot or strong
+// (an elite it can't fight). nullptr when the key is 0, or for a bot the flee leaves alone (pilot's party, test bot,
+// instance, careless).
+Creature* Aggro(PlayerbotAI* botAI, Player* bot, float x, float y);
 }  // namespace FleeBack
 
 class FleeBackTrigger : public Trigger
