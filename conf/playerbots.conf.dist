@@ -1436,6 +1436,12 @@ Playerbots.RandomBotAvoidElite = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotGroupFlee = 0
 
+# A [fight] line in Playerbots.log when a random bot enters combat (agent-wow local patch): its level, class, hp, mana,
+# potions, who began it, the first mob and the mobs on it after 2 s, then a short closing line for a fight that went on
+# to matter. At most one fight per bot per this many seconds; 0 writes none. Changes nothing the bot does.
+# Default: 0 (disabled)
+Playerbots.RandomBotFightLog = 0
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a
