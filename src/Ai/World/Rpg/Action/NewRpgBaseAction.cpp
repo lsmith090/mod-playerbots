@@ -104,12 +104,19 @@ std::unordered_map<uint32, Source> const& ItemSources()
     static std::once_flag once;
     std::call_once(once, []
     {
+        // The quest items as a derived table, joined: MySQL materializes it once (0.15-0.25 s on the live world, 1,911
+        // items). An `IN (SELECT ... UNION ...)` ran as a dependent subquery per loot row and held the world for 5 min
+        // on 2026-10-19.
         QueryResult result = WorldDatabase.Query(
-            "SELECT l.Item, MIN(IF(ct.`rank` = 0, ct.minlevel, 255)), MAX(ct.`rank` = 0) FROM creature_loot_template l "
-            "JOIN creature_template ct ON ct.lootid = l.Entry WHERE l.Item IN (SELECT RequiredItemId1 FROM quest_template "
-            "UNION SELECT RequiredItemId2 FROM quest_template UNION SELECT RequiredItemId3 FROM quest_template "
-            "UNION SELECT RequiredItemId4 FROM quest_template UNION SELECT RequiredItemId5 FROM quest_template "
-            "UNION SELECT RequiredItemId6 FROM quest_template) GROUP BY l.Item");
+            "SELECT l.Item, MIN(IF(ct.`rank` = 0, ct.minlevel, 255)), MAX(ct.`rank` = 0) FROM ("
+            "SELECT RequiredItemId1 AS Item FROM quest_template WHERE RequiredItemId1 > 0 "
+            "UNION SELECT RequiredItemId2 FROM quest_template WHERE RequiredItemId2 > 0 "
+            "UNION SELECT RequiredItemId3 FROM quest_template WHERE RequiredItemId3 > 0 "
+            "UNION SELECT RequiredItemId4 FROM quest_template WHERE RequiredItemId4 > 0 "
+            "UNION SELECT RequiredItemId5 FROM quest_template WHERE RequiredItemId5 > 0 "
+            "UNION SELECT RequiredItemId6 FROM quest_template WHERE RequiredItemId6 > 0) q "
+            "JOIN creature_loot_template l ON l.Item = q.Item JOIN creature_template ct ON ct.lootid = l.Entry "
+            "GROUP BY l.Item");
         if (!result)
             return;
 
