@@ -5,18 +5,25 @@
  */
 
 #include "GrindTargetValue.h"
+
+#include <map>
+#include <mutex>
+#include <set>
+
 #include "Config.h"
+#include "CreatureGroups.h"
 #include "NewRpgInfo.h"
 #include "Playerbots.h"
 #include "ReputationMgr.h"
 #include "ServerFacade.h"
 #include "SharedDefines.h"
+#include "World.h"
 
 namespace
 {
-// agent-wow: whether `packSize` other idle mobs stand within 15 yd of the unit.
+// agent-wow: the other idle mobs within 15 yd of the unit, counted up to `stop`.
 // ponytail: counts the other possible targets, not a fresh grid search; a mob out of the bot's sight range is missed.
-bool InPack(Unit* unit, GuidVector const& targets, uint32 packSize)
+uint32 PackCount(Unit* unit, GuidVector const& targets, uint32 stop)
 {
     uint32 others = 0;
     for (ObjectGuid const guid : targets)
@@ -28,12 +35,65 @@ bool InPack(Unit* unit, GuidVector const& targets, uint32 packSize)
         if (!other || !other->IsAlive() || other->IsInCombat() || other->IsCritter())
             continue;
 
-        if (other->GetDistance(unit) <= 15.0f && ++others >= packSize)
-            return true;
+        if (other->GetDistance(unit) <= 15.0f && ++others >= stop)
+            break;
     }
 
-    return false;
+    return others;
 }
+
+bool InPack(Unit* unit, GuidVector const& targets, uint32 packSize) { return PackCount(unit, targets, packSize) >= packSize; }
+
+// agent-wow: the mobs other than the pull that would come to it, by the three ways the core brings them:
+// - called: within CreatureFamilyAssistanceRadius (10 yd) of the pull, in its line of sight, and what the core's own
+//   AnyAssistCreatureInRangeCheck asks (Creature::CanAssistTo: same faction, answers calls, idle, hostile to the bot);
+// - aggro: not called, but the bot, fighting at the pull, stands inside the mob's own aggro distance;
+// - formation: a member of the pull's creature_formations group whose group_ai makes the group assist.
+// ponytail: the bot is taken to fight where the pull stands, so a caster who stands off 25 yd is closer to some mobs and
+// farther from others; a flee-call at low health (30 yd) and a patrol walking in are not counted.
+struct Joiners
+{
+    uint32 called = 0, aggro = 0, formation = 0;
+    uint32 Total() const { return called + aggro + formation; }
+};
+
+Joiners WouldJoin(PlayerbotAI* botAI, Player* bot, Creature* pull, GuidVector const& targets)
+{
+    Joiners joiners;
+    std::set<ObjectGuid> counted{pull->GetGUID()};
+    float const assist = sWorld->getFloatConfig(CONFIG_CREATURE_FAMILY_ASSISTANCE_RADIUS);
+    for (ObjectGuid const guid : targets)
+    {
+        Creature* mob = botAI->GetCreature(guid);
+        if (!mob || !mob->IsAlive() || mob->IsEngaged() || mob->IsCritter() || mob->GetOwnerGUID() ||
+            !counted.insert(guid).second)
+            continue;
+
+        float const d = mob->GetDistance(pull);
+        if (d <= assist && mob->CanAssistTo(pull, bot) && pull->IsWithinLOSInMap(mob))
+            ++joiners.called;
+        else if (mob->IsHostileTo(bot) && d < mob->GetAttackDistance(bot) && pull->IsWithinLOSInMap(mob))
+            ++joiners.aggro;
+        else
+            counted.erase(guid);
+    }
+
+    if (CreatureGroup* formation = pull->GetFormation())
+    {
+        auto const info = sFormationMgr->CreatureGroupMap.find(pull->GetSpawnId());
+        bool const assists = info != sFormationMgr->CreatureGroupMap.end() &&
+                             (info->second.groupAI & uint32(GroupAIFlags::GROUP_AI_FLAG_ASSIST_MASK));
+        for (auto const& member : formation->GetMembers())
+            if (assists && member.first && member.first->IsAlive() && !member.first->IsEngaged() &&
+                counted.insert(member.first->GetGUID()).second)
+                ++joiners.formation;
+    }
+
+    return joiners;
+}
+
+std::mutex joinLogLock;  // bots of different maps update on different threads
+std::map<ObjectGuid, std::pair<ObjectGuid, time_t>> joinLogged;  // by bot: the last pick logged and when; ponytail: never pruned
 }  // namespace
 
 Unit* GrindTargetValue::Calculate()
@@ -85,6 +145,13 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
     // GrindPackSize: a solo bot skips a mob with this many other idle mobs within 15 yd of it (0: off).
     static int32 const maxLevelAbove = sConfigMgr->GetOption<int32>("Playerbots.GrindMaxLevelAbove", 4);
     static uint32 const packSize = sConfigMgr->GetOption<uint32>("Playerbots.GrindPackSize", 0);
+    // agent-wow: GrindJoinSize replaces the pack rule: a solo bot skips a mob that this many others would come to
+    // (called, in aggro distance, or in its formation), 0: the pack rule stands. GrindJoinSizeLow is the number for a
+    // bot below level 10 (0: GrindJoinSize). GrindJoinLog: seconds between two [grind] lines per bot (0: none).
+    static uint32 const joinSize = sConfigMgr->GetOption<uint32>("Playerbots.GrindJoinSize", 0);
+    static uint32 const joinLow = sConfigMgr->GetOption<uint32>("Playerbots.GrindJoinSizeLow", 0);
+    static int32 const joinLog = sConfigMgr->GetOption<int32>("Playerbots.GrindJoinLog", 0);
+    uint32 const join = bot->GetLevel() < 10 && joinLow ? joinLow : joinSize;
 
     for (ObjectGuid const guid : targets)
     {
@@ -127,10 +194,6 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
             !unit->GetGUID().IsPlayer())
             continue;
 
-        // agent-wow: a careful player doesn't pull a mob standing in a pack; the others come along (social aggro).
-        if (packSize && !bot->InBattleground() && !group && unit->ToCreature() && InPack(unit, targets, packSize))
-            continue;
-
         if (Creature* creature = unit->ToCreature())
             if (CreatureTemplate const* CreatureTemplate = creature->GetCreatureTemplate())
                 if (CreatureTemplate->rank > CREATURE_ELITE_NORMAL && !AI_VALUE(bool, "can fight elite"))
@@ -140,6 +203,16 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
         {
             continue;
         }
+
+        // agent-wow: a careful player doesn't pull a mob standing in a pack; the others come along (social aggro).
+        if (join && !bot->InBattleground() && !group && unit->ToCreature())
+        {
+            if (WouldJoin(botAI, bot, unit->ToCreature(), targets).Total() >= join)
+                continue;
+        }
+        else if (packSize && !bot->InBattleground() && !group && unit->ToCreature() &&
+                 InPack(unit, targets, packSize))
+            continue;
 
         bool inactiveGrindStatus = botAI->rpgInfo.GetStatus() != RPG_WANDER_RANDOM && botAI->rpgInfo.GetStatus() != RPG_IDLE;
 
@@ -181,6 +254,25 @@ Unit* GrindTargetValue::FindTargetForGrinding(uint32 assistCount)
                 distance = newdistance;
                 result = unit;
             }
+        }
+    }
+
+    // agent-wow: what the pick would bring, beside what the pack rule counts, to read against the [fight] lines
+    if (joinLog > 0 && result && result->ToCreature() && !group && !bot->InBattleground())
+    {
+        time_t const now = time(nullptr);
+        std::lock_guard<std::mutex> guard(joinLogLock);
+        auto& last = joinLogged[bot->GetGUID()];
+        if (last.first != result->GetGUID() && now - last.second >= joinLog)
+        {
+            last = {result->GetGUID(), now};
+            Joiners const j = WouldJoin(botAI, bot, result->ToCreature(), targets);
+            LOG_INFO("playerbots",
+                     "[grind] {} (L{}) picks {} (entry {}, L{}) {:.0f} yd off; {} would join ({} called, {} in aggro, "
+                     "{} in its formation); {} others within 15 yd",
+                     bot->GetName(), bot->GetLevel(), result->GetName(), result->GetEntry(), result->GetLevel(),
+                     bot->GetDistance(result), j.Total(), j.called, j.aggro, j.formation,
+                     PackCount(result, targets, 99));
         }
     }
 

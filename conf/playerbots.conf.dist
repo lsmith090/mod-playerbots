@@ -1442,6 +1442,21 @@ Playerbots.RandomBotGroupFlee = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotFightLog = 0
 
+# A solo random bot skips a grind target that this many other mobs would join (agent-wow local patch), counted the
+# core's three ways: called (CreatureFamilyAssistanceRadius), in aggro distance of the fight, in the target's formation.
+# While set it replaces GrindPackSize's 15 yd count. 0: GrindPackSize stands.
+# Default: 0 (disabled)
+Playerbots.GrindJoinSize = 0
+
+# GrindJoinSize for a bot below level 10. 0: GrindJoinSize
+# Default: 0
+Playerbots.GrindJoinSizeLow = 0
+
+# A [grind] line per new grind pick, with the mobs that would join it, at most one per bot per this many seconds
+# (agent-wow local patch); 0 writes none. Changes nothing the bot does.
+# Default: 0 (disabled)
+Playerbots.GrindJoinLog = 0
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a
