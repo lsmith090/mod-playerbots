@@ -1471,6 +1471,12 @@ Playerbots.RandomBotGroupAsk = 0
 # Default: 12
 Playerbots.RandomBotGroupAskMaxLevel = 12
 
+# A mob this many levels or more above a random bot is strong for it in a group too (agent-wow local patch), so the
+# group steps out of its way and flees from it as a lone bot does: a group's "can fight elite" ignores levels.
+# 0: a group fights elites as upstream decides.
+# Default: 0 (disabled)
+Playerbots.RandomBotEliteGap = 0
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a

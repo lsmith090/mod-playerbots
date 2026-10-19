@@ -118,6 +118,10 @@ bool Clear(PlayerbotAI* botAI, Player* bot, float x, float y)
 // Yards beyond a strong mob's aggro distance at which a bot steps out of its way; 0: strong mobs are mobs like any
 int32 Avoid() { return sConfigMgr->GetOption<int32>("Playerbots.RandomBotAvoidElite", 0); }
 
+// Levels above the bot at which a strong mob stays strong for a bot in a group (the group's "can fight elite" ignores
+// levels); 0: a group fights elites as upstream decides
+int32 EliteGap() { return sConfigMgr->GetOption<int32>("Playerbots.RandomBotEliteGap", 0); }
+
 // A mob this bot can't fight alone: an elite, rare elite or boss that isn't far below it, or a rare three levels
 // above. Old Icebeard (L11 elite) alone was 424 of 4,804 bot deaths in three days, on bots of level 5 to 9.
 bool Strong(PlayerbotAI* botAI, Player* bot, Creature* mob)
@@ -129,6 +133,13 @@ bool Strong(PlayerbotAI* botAI, Player* bot, Creature* mob)
     int32 const above = int32(mob->GetLevel()) - int32(bot->GetLevel());
     if (rank == CREATURE_ELITE_NORMAL || above < (rank == CREATURE_ELITE_RARE ? 3 : -2))
         return false;
+
+    // "can fight elite" is true for any bot in a group that is following its leader, whatever the levels: a party of
+    // level 6 bots counted Old Icebeard (L11) as fightable and never stepped aside or ran (a quarter of his 274
+    // victims, 10-16 to 10-19, were in a group). With EliteGap set, a mob that many levels above is strong in a group too.
+    int32 const gap = EliteGap();
+    if (gap > 0 && above >= gap)
+        return true;
 
     return !botAI->GetAiObjectContext()->GetValue<bool>("can fight elite")->Get();
 }
