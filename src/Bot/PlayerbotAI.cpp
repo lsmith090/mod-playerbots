@@ -1054,11 +1054,12 @@ bool PlayerbotAI::IsAllowedCommand(std::string const text)
 void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fromPlayer)
 {
     // agent-wow local patch (#87): the craft service's fixed forms from any player of the bot's side go to
-    // the bot's queue ahead of the security levels; nothing else passes this way
+    // the bot's queue ahead of the security levels; nothing else passes this way. DENY_ALL is the level the
+    // queue re-checks before it runs a command: a stranger never holds ALLOW_ALL, so it would drop them all
     std::string const craft = CraftService::Command(bot, type, text, fromPlayer);
     if (!craft.empty())
     {
-        chatCommands.push_back(ChatCommandHolder(craft, fromPlayer, type));
+        chatCommands.push_back(ChatCommandHolder(craft, fromPlayer->GetGUID(), PLAYERBOT_SECURITY_DENY_ALL, type));
         return;
     }
 
@@ -1260,7 +1261,8 @@ void PlayerbotAI::HandleBotOutgoingPacket(WorldPacket const& packet)
                 bool const status = packet.GetOpcode() == SMSG_TRADE_STATUS;
                 std::string const command =
                     status ? "crafter trade " + std::to_string(packet.read<uint32>(0)) : "crafter items";
-                chatCommands.push_back(ChatCommandHolder(command, trader, CHAT_MSG_WHISPER));
+                chatCommands.push_back(
+                    ChatCommandHolder(command, trader->GetGUID(), PLAYERBOT_SECURITY_DENY_ALL, CHAT_MSG_WHISPER));
                 nextAICheckDelay = 0;  // the next update, not the passive delay (10 s) of a bot with no one near
                 if (status)
                     LOG_INFO("playerbots", "[craft] {} gets trade status {} at {}", bot->GetName(),
