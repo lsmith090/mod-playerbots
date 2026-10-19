@@ -1477,6 +1477,20 @@ Playerbots.RandomBotGroupAskMaxLevel = 12
 # Default: 0 (disabled)
 Playerbots.RandomBotEliteGap = 0
 
+# Deaths teach random bots (agent-wow local patch): a normal-rank mob that killed this many of the realm's characters or
+# more in the last RandomBotLearnedDangerDays, from 2 or more levels above them, in the bot's zone and 5-level band, is
+# strong for a bot 2 or more levels below it, like an elite. Read from hardcore_deaths every 10 minutes. 0: off.
+# Default: 0 (disabled)
+Playerbots.RandomBotLearnedDanger = 0
+
+# The days of deaths RandomBotLearnedDanger reads
+# Default: 3
+Playerbots.RandomBotLearnedDangerDays = 3
+
+# 1: RandomBotLearnedDanger's mobs are strong. 0: it only logs a [learned] line, once per mob and zone in 10 minutes.
+# Default: 0 (log only)
+Playerbots.RandomBotLearnedDangerAct = 0
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a
