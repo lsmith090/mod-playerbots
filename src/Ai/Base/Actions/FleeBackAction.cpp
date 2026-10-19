@@ -16,6 +16,7 @@
 #include "BotTraits.h"
 #include "CharmInfo.h"
 #include "Config.h"
+#include "DatabaseEnv.h"
 #include "FleeManager.h"
 #include "Group.h"
 #include "MoveSpline.h"
@@ -118,8 +119,68 @@ bool Clear(PlayerbotAI* botAI, Player* bot, float x, float y)
 // Yards beyond a strong mob's aggro distance at which a bot steps out of its way; 0: strong mobs are mobs like any
 int32 Avoid() { return sConfigMgr->GetOption<int32>("Playerbots.RandomBotAvoidElite", 0); }
 
+// agent-wow: deaths teach bots (Playerbots.RandomBotLearnedDanger, 0 off). A normal-rank mob that killed the realm's
+// characters Playerbots.RandomBotLearnedDanger times or more in the last RandomBotLearnedDangerDays (3) days, while
+// 2 or more levels above them, in the bot's zone and 5-level band (level / 5), counts as strong for a bot 2 or more
+// levels below it, like an elite. The set is read from acore_characters.hardcore_deaths by whichever bot asks first
+// after 10 minutes. RandomBotLearnedDangerAct 0 only logs, once per mob and zone in 10 minutes, and changes nothing.
+uint64 DeathKey(uint32 zone, uint32 band, uint32 entry) { return (uint64(zone) << 40) | (uint64(band) << 32) | entry; }
+
+bool Learned(Player* bot, Creature* mob)
+{
+    int32 const threshold = sConfigMgr->GetOption<int32>("Playerbots.RandomBotLearnedDanger", 0);
+    if (threshold <= 0 || mob->GetCreatureTemplate()->rank != CREATURE_ELITE_NORMAL ||
+        int32(mob->GetLevel()) - int32(bot->GetLevel()) < 2)
+        return false;
+
+    static std::mutex learnedLock;
+    static std::set<uint64> learned;
+    static time_t read = 0;
+    static std::map<uint64, time_t> logged;  // ponytail: never pruned; one time_t per learned mob and zone
+
+    time_t const now = time(nullptr);
+    std::lock_guard<std::mutex> guard(learnedLock);
+    if (now - read >= 600)
+    {
+        read = now;  // set first: a failed read waits its 10 minutes too
+        int32 const days = std::max(1, sConfigMgr->GetOption<int32>("Playerbots.RandomBotLearnedDangerDays", 3));
+        QueryResult result = CharacterDatabase.Query(
+            "SELECT zone, FLOOR(level / 5), killer_entry, COUNT(*) FROM hardcore_deaths WHERE died_at >= NOW() - INTERVAL {} "
+            "DAY AND killer_entry > 0 AND killer_level >= level + 2 GROUP BY 1, 2, 3 HAVING COUNT(*) >= {}",
+            days, threshold);
+        std::set<uint64> fresh;
+        if (result)
+        {
+            do
+            {
+                Field* fields = result->Fetch();
+                fresh.insert(DeathKey(fields[0].Get<uint32>(), fields[1].Get<uint32>(), fields[2].Get<uint32>()));
+            } while (result->NextRow());
+        }
+
+        LOG_INFO("playerbots", "[learned] {} mobs killed {}+ characters from 2+ levels above in {} days", fresh.size(),
+                 threshold, days);
+        learned = std::move(fresh);
+    }
+
+    uint64 const key = DeathKey(bot->GetZoneId(), bot->GetLevel() / 5, mob->GetEntry());
+    if (!learned.count(key))
+        return false;
+
+    bool const act = sConfigMgr->GetOption<bool>("Playerbots.RandomBotLearnedDangerAct", false);
+    time_t& last = logged[key];
+    if (now - last >= 600)
+    {
+        last = now;
+        LOG_INFO("playerbots", "[learned] {} (L{}) {} {} (L{}) strong in zone {}", bot->GetName(), bot->GetLevel(),
+                 act ? "treats" : "would treat", mob->GetName(), mob->GetLevel(), bot->GetZoneId());
+    }
+
+    return act;
+}
+
 // A mob this bot can't fight alone: an elite, rare elite or boss that isn't far below it, or a rare three levels
-// above. Old Icebeard (L11 elite) alone was 424 of 4,804 bot deaths in three days, on bots of level 5 to 9.
+// above, or one the realm's deaths have taught. Old Icebeard (L11 elite) alone was 424 of 4,804 bot deaths in three days, on bots of level 5 to 9.
 bool Strong(PlayerbotAI* botAI, Player* bot, Creature* mob)
 {
     if (!mob || !mob->IsAlive() || mob->GetOwnerGUID() || !mob->IsHostileTo(bot))
@@ -127,7 +188,7 @@ bool Strong(PlayerbotAI* botAI, Player* bot, Creature* mob)
 
     uint32 const rank = mob->GetCreatureTemplate()->rank;
     int32 const above = int32(mob->GetLevel()) - int32(bot->GetLevel());
-    if (rank == CREATURE_ELITE_NORMAL || above < (rank == CREATURE_ELITE_RARE ? 3 : -2))
+    if (rank == CREATURE_ELITE_NORMAL ? !Learned(bot, mob) : above < (rank == CREATURE_ELITE_RARE ? 3 : -2))
         return false;
 
     return !botAI->GetAiObjectContext()->GetValue<bool>("can fight elite")->Get();
