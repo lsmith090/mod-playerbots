@@ -1501,6 +1501,16 @@ Playerbots.RandomBotPathDanger = 0
 # Default: 0 (log only)
 Playerbots.RandomBotPathDangerHold = 0
 
+# A random bot skips, and drops from its log, a quest whose kill objective's creature is this many levels or more above
+# it, or elite while the bot is solo, or whose item only creatures that high (or only elites, solo) drop (agent-wow
+# local patch). 0: off.
+# Default: 0 (disabled)
+Playerbots.RandomBotQuestGate = 0
+
+# 1: RandomBotQuestGate skips and drops. 0: it only logs a [quest] line, once per bot and quest in 10 minutes.
+# Default: 0 (log only)
+Playerbots.RandomBotQuestGateAct = 0
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a

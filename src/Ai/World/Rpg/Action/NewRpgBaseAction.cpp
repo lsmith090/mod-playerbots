@@ -10,12 +10,15 @@
 #include <ctime>
 #include <map>
 #include <mutex>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "BroadcastHelper.h"
 #include "ChatHelper.h"
 #include "Config.h"
 #include "Creature.h"
+#include "DatabaseEnv.h"
 #include "GameObject.h"
 #include "GatherNodeMgr.h"
 #include "GossipDef.h"
@@ -45,6 +48,7 @@
 #include "SpeechForms.h"
 #include "StatsWeightCalculator.h"
 #include "Timer.h"
+#include "TestBots.h"
 #include "TravelMgr.h"
 #include "G3D/Vector2.h"
 
@@ -81,6 +85,112 @@ Creature* DangerOnWalk(PlayerbotAI* botAI, Player* bot, std::vector<G3D::Vector3
     }
 
     return nullptr;
+}
+
+// agent-wow: the level gate on a quest's creatures (Playerbots.RandomBotQuestGate). 76% of the random bots' deaths were
+// to a mob above the bot, and the grind pick's level cap (GrindMaxLevelAbove) never sees the mobs a quest sends a bot
+// among. Quest level + 3 (IsQuestCapableDoing) says nothing of the creatures a quest wants.
+struct Source
+{
+    uint8 normalMin = 255;  // lowest minlevel among its rank-0 droppers
+    bool normal = false;    // has a rank-0 dropper
+};
+
+std::unordered_map<uint32, Source> const& ItemSources()
+{
+    // Items quests ask for, by the creatures that drop them. Loaded at first use, once: the lowest-level normal
+    // dropper is the one a bot may pick; an item only elites drop is an elite quest for a solo bot.
+    static std::unordered_map<uint32, Source> sources;
+    static std::once_flag once;
+    std::call_once(once, []
+    {
+        QueryResult result = WorldDatabase.Query(
+            "SELECT l.Item, MIN(IF(ct.`rank` = 0, ct.minlevel, 255)), MAX(ct.`rank` = 0) FROM creature_loot_template l "
+            "JOIN creature_template ct ON ct.lootid = l.Entry WHERE l.Item IN (SELECT RequiredItemId1 FROM quest_template "
+            "UNION SELECT RequiredItemId2 FROM quest_template UNION SELECT RequiredItemId3 FROM quest_template "
+            "UNION SELECT RequiredItemId4 FROM quest_template UNION SELECT RequiredItemId5 FROM quest_template "
+            "UNION SELECT RequiredItemId6 FROM quest_template) GROUP BY l.Item");
+        if (!result)
+            return;
+
+        do
+        {
+            Field* fields = result->Fetch();
+            Source& source = sources[fields[0].Get<uint32>()];
+            source.normalMin = fields[1].Get<uint8>();
+            source.normal = fields[2].Get<uint8>() != 0;
+        } while (result->NextRow());
+    });
+    return sources;
+}
+
+std::mutex gateLock;  // bots of different maps update on different threads
+std::map<std::pair<ObjectGuid, uint32>, time_t> gateLogged;  // ponytail: never pruned; one time_t per bot and quest
+
+// The first thing about the quest's creatures that makes it too much for the bot, or "" (Playerbots.RandomBotQuestGate
+// levels, 0 off): a kill objective whose creature is that many levels above the bot (its lowest level), an elite one
+// when the bot is solo, or an item only creatures that high (or only elites, when solo) drop.
+std::string QuestGate(Player* bot, PlayerbotAI* botAI, Quest const* quest)
+{
+    int32 const levels = sConfigMgr->GetOption<int32>("Playerbots.RandomBotQuestGate", 0);
+    if (levels <= 0 || !sRandomPlayerbotMgr.IsRandomBot(bot) || TestBots::IsTestBot(bot) ||
+        !botAI->GetRealPlayersInGroup().empty())
+        return "";
+
+    bool const solo = !bot->GetGroup();
+    for (uint8 i = 0; i < QUEST_OBJECTIVES_COUNT; ++i)
+    {
+        int32 const entry = quest->RequiredNpcOrGo[i];
+        if (entry <= 0 || !quest->RequiredNpcOrGoCount[i])
+            continue;
+
+        CreatureTemplate const* ct = sObjectMgr->GetCreatureTemplate(uint32(entry));
+        if (!ct)
+            continue;
+
+        if (int32(ct->minlevel) - int32(bot->GetLevel()) >= levels)
+            return ct->Name + " (L" + std::to_string(ct->minlevel) + ")";
+
+        if (solo && ct->rank > CREATURE_ELITE_NORMAL)
+            return ct->Name + " (elite)";
+    }
+
+    auto const& sources = ItemSources();
+    for (uint8 i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i)
+    {
+        auto it = quest->RequiredItemId[i] ? sources.find(quest->RequiredItemId[i]) : sources.end();
+        if (it == sources.end())
+            continue;
+
+        if (it->second.normal ? int32(it->second.normalMin) - int32(bot->GetLevel()) >= levels : solo)
+            return "item " + std::to_string(quest->RequiredItemId[i]) + (it->second.normal ? " (dropped from L" +
+                   std::to_string(it->second.normalMin) + ")" : " (elites only)");
+    }
+
+    return "";
+}
+
+// True when the gate holds the quest back. With RandomBotQuestGateAct 0 it only logs, once per bot and quest in 10 min.
+bool QuestGated(Player* bot, PlayerbotAI* botAI, Quest const* quest, char const* what)
+{
+    std::string const why = QuestGate(bot, botAI, quest);
+    if (why.empty())
+        return false;
+
+    time_t const now = time(nullptr);
+    {
+        std::lock_guard<std::mutex> guard(gateLock);
+        time_t& last = gateLogged[{bot->GetGUID(), quest->GetQuestId()}];
+        if (now - last >= 600)
+        {
+            last = now;
+            LOG_INFO("playerbots", "[quest] {} (L{}) {} quest {} ({}): {}", bot->GetName(), bot->GetLevel(),
+                     sConfigMgr->GetOption<bool>("Playerbots.RandomBotQuestGateAct", false) ? what : "would skip",
+                     quest->GetQuestId(), quest->GetTitle(), why);
+        }
+    }
+
+    return sConfigMgr->GetOption<bool>("Playerbots.RandomBotQuestGateAct", false);
 }
 }  // namespace
 
@@ -686,11 +796,33 @@ bool NewRpgBaseAction::IsQuestCapableDoing(Quest const* quest)
     if (quest->GetSuggestedPlayers() >= 2)
         return false;
 
+    // agent-wow: the creatures it wants are too far above the bot (Playerbots.RandomBotQuestGate)
+    if (QuestGated(bot, botAI, quest, "skips"))
+        return false;
+
     return true;
 }
 
 bool NewRpgBaseAction::OrganizeQuestLog()
 {
+    // agent-wow: an incomplete quest the gate holds back is dropped at once, not only when the log is full: a bot that
+    // took it at a lower level (or before the gate) would walk to creatures it was meant to leave. A bot that has
+    // killed or looted some of it has put work in; it still drops, the same as the full-log pass below.
+    for (uint16 i = 0; i < MAX_QUEST_LOG_SIZE; ++i)
+    {
+        uint32 questId = bot->GetQuestSlotQuestId(i);
+        Quest const* quest = questId ? sObjectMgr->GetQuestTemplate(questId) : nullptr;
+        if (!quest || bot->GetQuestStatus(questId) != QUEST_STATUS_INCOMPLETE || !QuestGated(bot, botAI, quest, "drops"))
+            continue;
+
+        WorldPacket packet(CMSG_QUESTLOG_REMOVE_QUEST);
+        packet << (uint8)i;
+        WorldPackets::Quest::QuestLogRemoveQuest removeQuest(std::move(packet));
+        removeQuest.Read();
+        bot->GetSession()->HandleQuestLogRemoveQuest(removeQuest);
+        botAI->rpgStatistic.questDropped++;
+    }
+
     int32 freeSlotNum = 0;
 
     for (uint16 i = 0; i < MAX_QUEST_LOG_SIZE; ++i)
