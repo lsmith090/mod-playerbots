@@ -1462,6 +1462,15 @@ Playerbots.GrindJoinLog = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotRestHealth = 0
 
+# An ungrouped leader-type random bot of RandomBotGroupAskMaxLevel or under asks for a partner in chat on this percent
+# of its suggestion turns, ahead of the random pick (agent-wow local patch). 0: only when the random pick lands on it.
+# Default: 0 (disabled)
+Playerbots.RandomBotGroupAsk = 0
+
+# The highest level at which RandomBotGroupAsk applies
+# Default: 12
+Playerbots.RandomBotGroupAskMaxLevel = 12
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a

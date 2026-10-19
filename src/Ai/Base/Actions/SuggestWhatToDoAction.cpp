@@ -9,6 +9,7 @@
 #include "BroadcastHelper.h"
 #include "Channel.h"
 #include "ChatHelper.h"
+#include "Config.h"
 #include "Event.h"
 #include "GroupChat.h"
 #include "ItemVisitors.h"
@@ -55,9 +56,18 @@ bool SuggestWhatToDoAction::isUseful()
 
 bool SuggestWhatToDoAction::Execute(Event /*event*/)
 {
+    // agent-wow: an ungrouped leader-type bot of level RandomBotGroupAskMaxLevel or less asks for a partner (the LFG
+    // of specificQuest) on this share of its turns, not the 1 in 6 the random pick gives (Playerbots.RandomBotGroupAsk,
+    // percent, 0 off). Leader types are a fifth of the bots and the only ones that ask, so a free member hears a line
+    // only as often as the leaders near it roll that 1 in 6.
+    static uint32 const askPercent = sConfigMgr->GetOption<uint32>("Playerbots.RandomBotGroupAsk", 0);
+    static uint32 const askMaxLevel = sConfigMgr->GetOption<uint32>("Playerbots.RandomBotGroupAskMaxLevel", 12);
+    bool const eager = askPercent > 0 && !bot->GetGroup() && bot->GetLevel() <= askMaxLevel &&
+                       botAI->GetGrouperType() >= GrouperType::LEADER_2 && urand(0, 99) < askPercent;
+
     if (bot->GetGroup())
         GroupChat::Ask(botAI);  // agent-wow local patch (#291): grouped, only the LFM
-    else
+    else if (!eager || !GroupChat::Ask(botAI))  // asked: the turn is spent
     {
         uint32 index = rand() % suggestions.size();
         auto fnct_ptr = suggestions[index];
