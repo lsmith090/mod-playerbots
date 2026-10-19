@@ -1457,6 +1457,11 @@ Playerbots.GrindJoinSizeLow = 0
 # Default: 0 (disabled)
 Playerbots.GrindJoinLog = 0
 
+# A random bot with no master eats below this percent of health (agent-wow local patch), as it drinks below 85% of
+# mana; capped at 99, never below LowHealth. 0: it eats below LowHealth, as before.
+# Default: 0 (disabled)
+Playerbots.RandomBotRestHealth = 0
+
 # Random bots swim up for air (agent-wow local patch): under water with this many seconds of breath left beyond the
 # swim up, a bot swims straight up to the surface ahead of everything else, and out of combat waits there until half
 # its breath is back. With it on, a spawn under water is also left out of the grind cells (built at startup: a
