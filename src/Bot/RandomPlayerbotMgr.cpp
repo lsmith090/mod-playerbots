@@ -343,7 +343,8 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 /*elapsed*/, bool /*minimal*/)
     // which prevents unneeded expensive GameTime calls.
     if (_isBotInitializing)
     {
-        _isBotInitializing = GameTime::GetUptime().count() < sPlayerbotAIConfig.MaxRandomBots * (0.11 + 0.4);
+        _isBotInitializing = !sConfigMgr->GetOption<bool>("Playerbots.RandomBotPacedStartup", false) &&
+                             GameTime::GetUptime().count() < sPlayerbotAIConfig.MaxRandomBots * (0.11 + 0.4);
     }
 
     uint32 updateIntervalTurboBoost = _isBotInitializing ? 1 : sPlayerbotAIConfig.RandomBotUpdateInterval;
