@@ -99,6 +99,12 @@ size_t On(Player* bot)
     return on;
 }
 
+// A mob that never starts a fight with a player: a civilian (flags_extra 2) or one immune to players, the core's own
+// first two refusals in Creature::CanStartAttack. Gyll, the Alliance gryphon master in Booty Bay (L55 elite, civilian),
+// held 110 Horde bots of level 4 to 7 on the dock for days, each stepping out of his way every 10 s (2026-10-23).
+// Once one is on the bot it is a fight like any other.
+bool Harmless(Creature* mob) { return mob->IsCivilian() || mob->IsImmuneToPC(); }
+
 // No mob but those on the bot would aggro at (x, y). ponytail: only the mobs the bot sees (possible targets no los,
 // its sight distance); a kept position 80 yd back may have a pack the bot no longer sees.
 bool Clear(PlayerbotAI* botAI, Player* bot, float x, float y)
@@ -106,7 +112,7 @@ bool Clear(PlayerbotAI* botAI, Player* bot, float x, float y)
     for (ObjectGuid const guid : botAI->GetAiObjectContext()->GetValue<GuidVector>("possible targets no los")->Get())
     {
         Creature* mob = botAI->GetCreature(guid);
-        if (!mob || !mob->IsAlive() || mob->GetVictim() == bot)
+        if (!mob || !mob->IsAlive() || mob->GetVictim() == bot || Harmless(mob))
             continue;
 
         if (mob->GetDistance2d(x, y) < mob->GetAttackDistance(bot) + 5.0f)
@@ -188,7 +194,8 @@ bool Learned(Player* bot, Creature* mob)
 // days, on bots of level 5 to 9.
 bool Strong(PlayerbotAI* botAI, Player* bot, Creature* mob)
 {
-    if (!mob || !mob->IsAlive() || mob->GetOwnerGUID() || !mob->IsHostileTo(bot))
+    if (!mob || !mob->IsAlive() || mob->GetOwnerGUID() || !mob->IsHostileTo(bot) ||
+        (Harmless(mob) && mob->GetVictim() != bot))
         return false;
 
     uint32 const rank = mob->GetCreatureTemplate()->rank;
@@ -318,7 +325,8 @@ Creature* FleeBack::Aggro(PlayerbotAI* botAI, Player* bot, float x, float y)
     for (ObjectGuid const guid : botAI->GetAiObjectContext()->GetValue<GuidVector>("possible targets no los")->Get())
     {
         Creature* mob = botAI->GetCreature(guid);
-        if (!mob || !mob->IsAlive() || mob->GetVictim() == bot || mob->GetOwnerGUID() || !mob->IsHostileTo(bot))
+        if (!mob || !mob->IsAlive() || mob->GetVictim() == bot || mob->GetOwnerGUID() || !mob->IsHostileTo(bot) ||
+            Harmless(mob))
             continue;
 
         if (mob->GetDistance2d(x, y) < mob->GetAttackDistance(bot) + 5.0f &&
