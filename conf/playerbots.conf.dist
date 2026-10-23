@@ -1427,6 +1427,13 @@ Playerbots.RandomBotFleeCommit = 0
 # Default: 0 (disabled)
 Playerbots.RandomBotAvoidElite = 0
 
+# A random bot gives up a goal a strong mob stands on (agent-wow local patch): after stepping out of the same mob's
+# way for this many seconds, no gap of 3 minutes between steps and the mob within 10 yd of where it first stood, the
+# bot drops its rpg goal; a quest is abandoned as upstream abandons one with no progress. A patrol passes before it.
+# Needs RandomBotAvoidElite. 0: it keeps the goal. Read at every check.
+# Default: 0 (disabled)
+Playerbots.RandomBotAvoidEliteGiveUp = 0
+
 # A group of random bots flees as one (agent-wow local patch). Outnumbered is counted for the members standing
 # together (within 40 yd): the mobs on all of them against RandomBotFlee plus one for each mate, so a member with two
 # mobs on it no longer runs off while its mates fight them. When one does flee for the group's reason (outnumbered

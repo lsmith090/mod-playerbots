@@ -125,6 +125,40 @@ bool Clear(PlayerbotAI* botAI, Player* bot, float x, float y)
 // Yards beyond a strong mob's aggro distance at which a bot steps out of its way; 0: strong mobs are mobs like any
 int32 Avoid() { return sConfigMgr->GetOption<int32>("Playerbots.RandomBotAvoidElite", 0); }
 
+// Seconds of stepping out of one strong mob's way, that mob standing where it stood, after which the bot drops its rpg
+// goal (a quest: as upstream abandons one with no progress); 0: it keeps the goal
+int32 GiveUp() { return sConfigMgr->GetOption<int32>("Playerbots.RandomBotAvoidEliteGiveUp", 0); }
+
+struct Blocker  // the strong mob a bot keeps stepping out of the way of, and where it stood at the first step
+{
+    ObjectGuid mob;
+    float x = 0.0f, y = 0.0f;
+    time_t first = 0, last = 0;
+};
+
+std::map<ObjectGuid, Blocker> blockers;  // by bot, under lock; ponytail: never pruned, one per bot that stepped aside
+time_t const BLOCK_GAP = 180;            // s without a step out of its way ends a blocker
+float const BLOCK_MOVED = 10.0f;         // yd a blocker may wander from its first spot (Zalaphil wanders 5)
+
+// True once the bot has stepped out of the same mob's way, the mob standing still, for GiveUp() seconds. Watch
+// Commander Zalaphil (L9 rare) stands 27 yd from Lieutenant Benedict, quest 784's last kill: level 5 and 6 bots stepped
+// out of his way every 7 s for up to 35 minutes, each time teleported back by the stuck check, until upstream's
+// abandon (23 visits, 237 bot-minutes, 10-23 05:00 to 09:20). A patrol passes in 2 minutes (Old Icebeard).
+bool Blocked(Player* bot, Creature* mob, time_t now)
+{
+    std::lock_guard<std::mutex> guard(lock);
+    Blocker& b = blockers[bot->GetGUID()];
+    if (b.mob != mob->GetGUID() || now - b.last > BLOCK_GAP || mob->GetExactDist2d(b.x, b.y) > BLOCK_MOVED)
+        b = Blocker{mob->GetGUID(), mob->GetPositionX(), mob->GetPositionY(), now, now};
+
+    b.last = now;
+    if (now - b.first < GiveUp())
+        return false;
+
+    blockers.erase(bot->GetGUID());
+    return true;
+}
+
 // Levels above the bot at which a strong mob stays strong for a bot in a group (the group's "can fight elite" ignores
 // levels); 0: a group fights elites as upstream decides
 int32 EliteGap() { return sConfigMgr->GetOption<int32>("Playerbots.RandomBotEliteGap", 0); }
@@ -546,9 +580,28 @@ bool FleeBackAction::Execute(Event /*event*/)
                              strong->GetCreatureTemplate()->rank == CREATURE_ELITE_RARE ? " rare" : " elite")
                : "";
     if (!fight && now >= run.until)
+    {
         LOG_INFO("playerbots", "[flee] {} steps out of the way of{} {:.0f} yd off, to {} {:.0f} yd away", bot->GetName(),
                  from, strong ? bot->GetDistance(strong) : 0.0f,
                  back < trail.size() ? "where it came from" : "a scored spot", bot->GetExactDist2d(x, y));
+
+        // The same mob standing still keeps the bot from its goal: drop the goal, not the step
+        if (strong && GiveUp() > 0 && Blocked(bot, strong, now))
+        {
+            NewRpgInfo& info = botAI->rpgInfo;
+            uint32 quest = 0;
+            if (auto const* doing = std::get_if<NewRpgInfo::DoQuest>(&info.data))
+            {
+                quest = doing->questId;
+                botAI->lowPriorityQuest.insert(quest);
+                botAI->rpgStatistic.questAbandoned++;
+            }
+
+            LOG_INFO("playerbots", "[flee] {} gives up {} after {} s out of the way of {}", bot->GetName(),
+                     quest ? fmt::format("quest {}", quest) : std::string("its goal"), GiveUp(), strong->GetName());
+            info.ChangeToIdle();
+        }
+    }
     else if (now >= run.until)  // a new flee, not the next leg of one
         LOG_INFO("playerbots", "[flee] {} flees {} mobs at {:.0f}% hp to {} {:.0f} yd away{}{}", bot->GetName(), On(bot),
                  bot->GetHealthPct(),
