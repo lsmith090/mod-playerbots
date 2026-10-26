@@ -7,7 +7,9 @@
 #include "GatherNodeMgr.h"
 
 #include <algorithm>
+#include <cmath>
 
+#include "Config.h"
 #include "DBCStores.h"
 #include "DatabaseEnv.h"
 #include "GameObject.h"
@@ -54,6 +56,19 @@ bool GetGatherSkillFromTemplate(GameObjectTemplate const* goInfo, uint32& skillI
 
     return false;
 }
+
+// Local patch (agent-wow #2629): how near a spawn makes a node unsafe, and the cell size of the index that finds it.
+constexpr float GATHER_THREAT_RADIUS = 30.0f;
+
+uint64 ThreatCell(uint32 mapId, int32 cx, int32 cy)
+{
+    return (uint64(mapId) << 32) | (uint64(uint16(cx + 0x8000)) << 16) | uint16(cy + 0x8000);
+}
+
+int32 ThreatCellOf(float coord) { return int32(std::floor(coord / GATHER_THREAT_RADIUS)); }
+
+// Read once per call, not per node: 0 is off.
+uint32 SafeGap() { return sConfigMgr->GetOption<uint32>("Playerbots.RandomBotGatherSafeGap", 0); }
 }
 
 void GatherNodeMgr::Load()
@@ -118,11 +133,96 @@ void GatherNodeMgr::Load()
     }
 
     LOG_INFO("playerbots", ">> Loaded {} gather node spawns in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
+
+    LoadThreats();
 }
 
-bool GatherNodeMgr::IsUsable(PlayerbotAI* botAI, Player* bot, GatherNodeSpawn const& node)
+// Local patch (agent-wow #2629): after #2277 sent bots to nodes (DoGather 15), random-bot deaths to a creature 3+
+// levels above them within 25 yd of a node rose from 74 to 735 in two days. Each node keeps, per team, the highest
+// level among the spawns within 30 yd that would attack that team's player: not a civilian, a trigger or a mob immune
+// to players (patch 44's harmless), and hostile by its faction template. A node's own level check is then one compare.
+void GatherNodeMgr::LoadThreats()
+{
+    uint32 oldMSTime = getMSTime();
+
+    std::unordered_map<uint64, std::vector<GatherNodeSpawn*>> cells;
+    uint32 total = 0;
+    for (auto& [mapId, zones] : _nodes)
+        for (auto& [zoneId, nodes] : zones)
+            for (GatherNodeSpawn& node : nodes)
+            {
+                cells[ThreatCell(mapId, ThreatCellOf(node.pos.GetPositionX()), ThreatCellOf(node.pos.GetPositionY()))]
+                    .push_back(&node);
+                ++total;
+            }
+
+    // A human's and an orc's own templates stand for each team's players.
+    FactionTemplateEntry const* players[2] = {sFactionTemplateStore.LookupEntry(1), sFactionTemplateStore.LookupEntry(2)};
+    if (!players[0] || !players[1])
+        return;
+
+    float const radiusSq = GATHER_THREAT_RADIUS * GATHER_THREAT_RADIUS;
+    for (auto const& [spawnId, data] : sObjectMgr->GetAllCreatureData())
+    {
+        if (cells.empty())
+            break;
+
+        for (uint32 entry : {data.id, data.id2, data.id3})
+        {
+            CreatureTemplate const* info = entry ? sObjectMgr->GetCreatureTemplate(entry) : nullptr;
+            if (!info || info->HasFlagsExtra(CREATURE_FLAG_EXTRA_CIVILIAN | CREATURE_FLAG_EXTRA_TRIGGER) ||
+                ((info->unit_flags | data.unit_flags) & UNIT_FLAG_IMMUNE_TO_PC))
+                continue;
+
+            FactionTemplateEntry const* faction = sFactionTemplateStore.LookupEntry(info->faction);
+            if (!faction)
+                continue;
+
+            bool hostile[2] = {faction->IsHostileTo(*players[0]), faction->IsHostileTo(*players[1])};
+            if (!hostile[0] && !hostile[1])
+                continue;
+
+            WorldPosition pos(data.mapid, data.posX, data.posY, data.posZ);
+            int32 cx = ThreatCellOf(data.posX);
+            int32 cy = ThreatCellOf(data.posY);
+            for (int32 dx = -1; dx <= 1; ++dx)
+                for (int32 dy = -1; dy <= 1; ++dy)
+                {
+                    auto itr = cells.find(ThreatCell(data.mapid, cx + dx, cy + dy));
+                    if (itr == cells.end())
+                        continue;
+
+                    for (GatherNodeSpawn* node : itr->second)
+                    {
+                        if (node->pos.sqDistance(pos) > radiusSq)
+                            continue;
+
+                        for (uint8 team = 0; team < 2; ++team)
+                            if (hostile[team])
+                                node->threatLevel[team] = std::max(node->threatLevel[team], info->maxlevel);
+                    }
+                }
+        }
+    }
+
+    uint32 threatened = 0;
+    for (auto const& [cell, nodes] : cells)
+        for (GatherNodeSpawn const* node : nodes)
+            if (node->threatLevel[0] || node->threatLevel[1])
+                ++threatened;
+
+    LOG_INFO("playerbots", "[gather] {} of {} gather nodes have a hostile spawn within {} yd, in {} ms", threatened,
+             total, GATHER_THREAT_RADIUS, GetMSTimeDiffToNow(oldMSTime));
+}
+
+bool GatherNodeMgr::IsUsable(PlayerbotAI* botAI, Player* bot, GatherNodeSpawn const& node, uint32 safeGap)
 {
     if (!botAI->HasSkill(SkillType(node.skillId)))
+        return false;
+
+    // Local patch (agent-wow #2629): no node with a spawn near it more than safeGap levels above the bot.
+    TeamId team = bot->GetTeamId();
+    if (safeGap && team < TEAM_NEUTRAL && node.threatLevel[team] > bot->GetLevel() + safeGap)
         return false;
 
     return bot->GetSkillValue(node.skillId) >= node.reqSkillValue;
@@ -148,8 +248,9 @@ bool GatherNodeMgr::HasUsableNodes(Player* bot)
     if (!botAI)
         return false;
 
+    uint32 safeGap = SafeGap();
     for (GatherNodeSpawn const& node : *nodes)
-        if (IsUsable(botAI, bot, node))
+        if (IsUsable(botAI, bot, node, safeGap))
             return true;
 
     return false;
@@ -169,9 +270,10 @@ GatherNodeSpawn const* GatherNodeMgr::GetNextNode(Player* bot, std::unordered_se
     WorldPosition botPos(bot);
 
     std::vector<std::pair<float, GatherNodeSpawn const*>> candidates;
+    uint32 safeGap = SafeGap();
     for (GatherNodeSpawn const& node : *nodes)
     {
-        if (visited.contains(node.spawnId) || !IsUsable(botAI, bot, node))
+        if (visited.contains(node.spawnId) || !IsUsable(botAI, bot, node, safeGap))
             continue;
 
         // Don't route to spawn points we can already see to be empty.
@@ -228,6 +330,7 @@ GatherNodeSpawn const* GatherNodeMgr::GetNearestLiveNode(Player* bot,
     WorldPosition botPos(bot);
     GatherNodeSpawn const* nearest = nullptr;
     float nearestDistSq = radius * radius;
+    uint32 safeGap = SafeGap();
     // All zone buckets of the map: this query is deliberately not
     // zone-scoped, and a radius this small prunes nearly everything on the
     // cheap distance check.
@@ -239,7 +342,7 @@ GatherNodeSpawn const* GatherNodeMgr::GetNearestLiveNode(Player* bot,
             if (distSq > nearestDistSq)
                 continue;
 
-            if (visited.contains(node.spawnId) || !IsUsable(botAI, bot, node))
+            if (visited.contains(node.spawnId) || !IsUsable(botAI, bot, node, safeGap))
                 continue;
 
             if (!map->IsGridLoaded(node.pos.GetPositionX(), node.pos.GetPositionY()))

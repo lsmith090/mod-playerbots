@@ -25,6 +25,9 @@ struct GatherNodeSpawn
     WorldPosition pos{};
     uint32 skillId{0};  // SKILL_HERBALISM or SKILL_MINING
     uint32 reqSkillValue{0};
+    // Local patch (agent-wow #2629): the highest level of a spawn within 30 yd that would attack a player of that team
+    // (TEAM_ALLIANCE, TEAM_HORDE), 0 when none. Read against Playerbots.RandomBotGatherSafeGap.
+    uint8 threatLevel[2]{0, 0};
 };
 
 /// Index of gatherable gameobject spawns (herbs/veins) on continent maps,
@@ -65,7 +68,9 @@ public:
                                               float radius);
 
 private:
-    bool IsUsable(PlayerbotAI* botAI, Player* bot, GatherNodeSpawn const& node);
+    bool IsUsable(PlayerbotAI* botAI, Player* bot, GatherNodeSpawn const& node, uint32 safeGap);
+
+    void LoadThreats();
 
     std::vector<GatherNodeSpawn> const* GetZoneNodes(uint32 mapId, uint32 zoneId) const;
 

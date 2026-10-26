@@ -1709,6 +1709,12 @@ Playerbots.RpgStatusProbWeight.Rest = 5
 Playerbots.RpgStatusProbWeight.OutdoorPvp = 10
 Playerbots.RpgStatusProbWeight.DoGather = 15
 
+# Local patch (agent-wow #2629): a gathering bot skips a node with a hostile spawn within 30 yd more than this many
+# levels above it (not a civilian, a trigger or a mob immune to players). A zone with no node left is like an empty one.
+# The spawns near each node are read once at startup; the key is read at every pick.
+# Default: 0 (disabled)
+Playerbots.RandomBotGatherSafeGap = 0
+
 # Bots' minimum and maximum level when teleporting in and out of a zone, according to the new RPG strategy
 # Format: Playerbots.ZoneBracket.zoneID = minLevel,maxLevel
 #
