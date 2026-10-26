@@ -101,6 +101,17 @@ Playerbots.RandomBotAccountCount = 0
 # 10 bots (or 9 if WotLK is disabled), one bot for each class.
 Playerbots.AddClassAccountPoolSize = 50
 
+# Local patch (agent-wow #2630): the startup walk lists the random-bot accounts there are and makes only those still
+# needed, numbered after the highest, instead of walking RandomBotAccountPrefix0..N-1 and making any name missing. The
+# type rows of accounts that are gone are dropped first. Turn it on before deleting random-bot accounts.
+# Default: 0 (disabled)
+Playerbots.RandomBotListAccounts = 0
+
+# Local patch (agent-wow #2630): `.playerbots rndbot addaccounts` takes a spare account (type 0) as a random-bot account,
+# characters and all, before it makes a new one.
+# Default: 0 (disabled)
+Playerbots.RandomBotAddTakesSpare = 0
+
 # Prefix for created bot accounts (of any type).
 # Do not change this prefix while there are existing bot accounts.
 Playerbots.RandomBotAccountPrefix = "rndbot"

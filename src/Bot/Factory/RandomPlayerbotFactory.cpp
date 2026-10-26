@@ -12,6 +12,7 @@
 #include "AccountMgr.h"
 #include "ArenaTeamMgr.h"
 #include "CharacterCache.h"
+#include "Config.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
 #include "DatabaseEnv.h"
@@ -482,6 +483,80 @@ uint32 RandomPlayerbotFactory::CalculateAvailableCharsPerAccount()
     return availableChars;
 }
 
+// Local patch (agent-wow #2630): with Playerbots.RandomBotListAccounts on, the startup walk takes the random-bot accounts
+// there are by listing them, and makes only the accounts still needed, numbered after the highest. Upstream walks
+// rndbot0..N-1 and makes any name that is missing, so an account deleted for having no living character (a hardcore bot
+// lives once) came back at the next start with new characters. The type rows of accounts that are gone are dropped first,
+// so the count of accounts needed reads the accounts there are.
+namespace
+{
+    bool ListAccounts() { return sConfigMgr->GetOption<bool>("Playerbots.RandomBotListAccounts", false); }
+
+    void DropGoneAccountTypes()
+    {
+        std::unordered_set<uint32> accounts;
+        if (QueryResult result = LoginDatabase.Query("SELECT id FROM account"))
+        {
+            do
+                accounts.insert(result->Fetch()[0].Get<uint32>());
+            while (result->NextRow());
+        }
+        if (accounts.empty())
+            return;  // a read that failed is no reason to drop every row
+
+        std::string gone;
+        uint32 count = 0;
+        if (QueryResult result = PlayerbotsDatabase.Query("SELECT account_id FROM playerbots_account_type"))
+        {
+            do
+            {
+                uint32 const accountId = result->Fetch()[0].Get<uint32>();
+                if (accounts.contains(accountId))
+                    continue;
+                gone += (gone.empty() ? "" : ", ") + std::to_string(accountId);
+                ++count;
+            } while (result->NextRow());
+        }
+        if (gone.empty())
+            return;
+
+        PlayerbotsDatabase.DirectExecute("DELETE FROM playerbots_account_type WHERE account_id IN (" + gone + ")");
+        LOG_INFO("playerbots", "[accounts] dropped the type rows of {} accounts that are gone", count);
+    }
+
+    std::vector<std::string> RandomBotAccountNames(uint32 total)
+    {
+        std::string const& prefix = sPlayerbotAIConfig.RandomBotAccountPrefix;
+        std::vector<std::string> names;
+        if (!ListAccounts())
+        {
+            for (uint32 number = 0; number < total; ++number)
+                names.push_back(prefix + std::to_string(number));
+            return names;
+        }
+
+        uint64 next = 0;
+        if (QueryResult result = LoginDatabase.Query(
+                "SELECT username, CAST(SUBSTRING(username, {}) AS UNSIGNED) FROM account WHERE username LIKE '{}%%' "
+                "ORDER BY id",
+                prefix.size() + 1, prefix.c_str()))
+        {
+            do
+            {
+                Field* fields = result->Fetch();
+                names.push_back(fields[0].Get<std::string>());
+                next = std::max(next, fields[1].Get<uint64>() + 1);
+            } while (result->NextRow());
+        }
+
+        size_t const listed = names.size();
+        while (names.size() < total)
+            names.push_back(prefix + std::to_string(next++));
+        LOG_INFO("playerbots", "[accounts] {} random-bot accounts listed, {} to make", listed, names.size() - listed);
+        return names;
+    }
+}
+
 void RandomPlayerbotFactory::CreateRandomBots()
 {
     /* multi-thread here is meaningless? since the async db operations */
@@ -633,16 +708,16 @@ void RandomPlayerbotFactory::CreateRandomBots()
     std::vector<std::future<void>> account_creations;
     int account_creation = 0;
 
+    if (ListAccounts())
+        DropGoneAccountTypes();
+
     // Calculates the total number of required accounts.
     uint32 totalAccountCount = CalculateTotalAccountCount();
+    std::vector<std::string> const accountNames = RandomBotAccountNames(totalAccountCount);
     uint32 timer = getMSTime();
 
-    for (uint32 accountNumber = 0; accountNumber < totalAccountCount; ++accountNumber)
+    for (std::string const& accountName : accountNames)
     {
-        std::ostringstream out;
-        out << sPlayerbotAIConfig.RandomBotAccountPrefix << accountNumber;
-        std::string const accountName = out.str();
-
         LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_GET_ACCOUNT_ID_BY_USERNAME);
         stmt->SetData(0, accountName);
         PreparedQueryResult result = LoginDatabase.Query(stmt);
@@ -672,11 +747,9 @@ void RandomPlayerbotFactory::CreateRandomBots()
     int bot_creation = 0;
     timer = getMSTime();
     bool nameCached = false;
-    for (uint32 accountNumber = 0; accountNumber < totalAccountCount; ++accountNumber)
+    for (uint32 accountNumber = 0; accountNumber < accountNames.size(); ++accountNumber)
     {
-        std::ostringstream out;
-        out << sPlayerbotAIConfig.RandomBotAccountPrefix << accountNumber;
-        std::string const accountName = out.str();
+        std::string const& accountName = accountNames[accountNumber];
 
         LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_GET_ACCOUNT_ID_BY_USERNAME);
         stmt->SetData(0, accountName);
@@ -724,7 +797,7 @@ void RandomPlayerbotFactory::CreateRandomBots()
             } while (result->NextRow());
         }
 
-        LOG_DEBUG("playerbots", "Creating random bot characters for account: [{}/{}]", accountNumber + 1, totalAccountCount);
+        LOG_DEBUG("playerbots", "Creating random bot characters for account: [{}/{}]", accountNumber + 1, accountNames.size());
         RandomPlayerbotFactory factory;
 
         WorldSession* session = new WorldSession(accountId, "", 0x0, nullptr, SEC_PLAYER, EXPANSION_WRATH_OF_THE_LICH_KING,
@@ -909,7 +982,8 @@ namespace
 
             // Full: the manager's lists take it. AssignAccountTypes rebuilds the type-1 list from the table (two
             // small queries; it assigns nothing while the pool holds MaxRandomBots' worth of type-1 accounts).
-            sPlayerbotAIConfig.RandomBotAccounts.push_back(a.accountId);
+            if (!sPlayerbotAIConfig.IsInRandomAccountList(a.accountId))  // a spare taken is listed since the start
+                sPlayerbotAIConfig.RandomBotAccounts.push_back(a.accountId);
             sRandomPlayerbotMgr.AssignAccountTypes();
             LOG_INFO("playerbots", "[addaccounts] {} ({}) ready with {} characters, {} to go", a.name, a.accountId,
                      a.characters, a.pending);
@@ -947,6 +1021,45 @@ namespace
         {
             a.names.clear();
             return false;
+        }
+
+        // Local patch (agent-wow #2630): with Playerbots.RandomBotAddTakesSpare on, a spare account (type 0: the addclass
+        // pool's once AddClassAccountPoolSize is 0) becomes a random-bot account before a new one is made. Its characters
+        // stay; the step above tops it up and hands it to the manager. Three small queries, each by key.
+        if (sConfigMgr->GetOption<bool>("Playerbots.RandomBotAddTakesSpare", false))
+        {
+            if (QueryResult spare = PlayerbotsDatabase.Query(
+                    "SELECT account_id FROM playerbots_account_type WHERE account_type = 0 ORDER BY account_id LIMIT 1"))
+            {
+                uint32 const accountId = spare->Fetch()[0].Get<uint32>();
+                std::string name;
+                if (!AccountMgr::GetName(accountId, name))
+                {
+                    // the row of an account that is gone: dropped, and the next step looks again
+                    PlayerbotsDatabase.DirectExecute(
+                        Acore::StringFormat("DELETE FROM playerbots_account_type WHERE account_id = {}", accountId));
+                    return true;
+                }
+
+                PlayerbotsDatabasePreparedStatement* stmt = PlayerbotsDatabase.GetPreparedStatement(PLAYERBOTS_UPD_ACCOUNT_TYPE);
+                stmt->SetData(0, uint8(1));
+                stmt->SetData(1, accountId);
+                PlayerbotsDatabase.DirectExecute(stmt);
+
+                --a.pending;
+                a.name = name;
+                a.accountId = accountId;
+                a.session = new WorldSession(accountId, "", 0x0, nullptr, SEC_PLAYER, EXPANSION_WRATH_OF_THE_LICH_KING,
+                                             time_t(0), LOCALE_enUS, 0, false, false, 0);
+                if (QueryResult held = CharacterDatabase.Query("SELECT class FROM characters WHERE account = {}", accountId))
+                {
+                    do
+                        a.classesHeld.insert(held->Fetch()[0].Get<uint8>());
+                    while (held->NextRow());
+                }
+                LOG_INFO("playerbots", "[addaccounts] taking spare {} ({})", name, accountId);
+                return true;
+            }
         }
 
         // The next number after the highest, so the accounts stay rndbot0..N-1 and the startup walk finds them all.
