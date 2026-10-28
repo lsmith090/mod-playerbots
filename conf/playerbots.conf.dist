@@ -2029,6 +2029,14 @@ Playerbots.RandomBotUpdateInterval = 20
 # Default: 0 (disabled)
 Playerbots.RandomBotPacedStartup = 0
 
+# Every online bot is visited at each pass (agent-wow local patch). Upstream's pass ends at the first bot that is not
+# updated while RandomBotsPerInterval * focus / 100 is 0 (RandomBotsPerInterval under 2), so a grouped bot can stall
+# every logout and login for hours, and an updated one wraps the count and logs in up to the whole shortfall at once.
+# 1: the pass visits every online bot (each bot's own update time decides whether it is due), and logs in
+# RandomBotsPerInterval's share only, never the update count's leftover. Read at every pass.
+# Default: 0 (disabled)
+Playerbots.RandomBotUpdateEveryBot = 0
+
 # Minimum and maximum seconds before the manager re-evaluates and adjusts total randombot count
 # Defaults: 1800 (min), 7200 (max)
 Playerbots.RandomBotCountChangeMinInterval = 1800

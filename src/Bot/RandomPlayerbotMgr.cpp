@@ -434,6 +434,12 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 /*elapsed*/, bool /*minimal*/)
             : 0;
     uint32 loginBots = std::min(sPlayerbotAIConfig.RandomBotsPerInterval - updateBots, maxNewBots);
 
+    // agent-wow local patch: every online bot is visited each pass (its "update" event decides whether it is due), and
+    // the login count stays RandomBotsPerInterval's share. Upstream's loop ended the pass at the first bot that was
+    // not updated (grouped, in flight or not due) while updateBots was 0, and wrapped updateBots when one was:
+    // a grouped bot first in the set stalled every logout and login for hours, a wrapped pass logged in a crowd.
+    bool const everyBot = sConfigMgr->GetOption<bool>("Playerbots.RandomBotUpdateEveryBot", false);
+
     if (!availableBots.empty())
     {
         // Update bots
@@ -442,18 +448,19 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 /*elapsed*/, bool /*minimal*/)
             if (!GetPlayerBot(bot))
                 continue;
 
-            if (ProcessBot(bot))
+            if (ProcessBot(bot) && !everyBot)
             {
                 updateBots--;
             }
 
-            if (!updateBots)
+            if (!updateBots && !everyBot)
                 break;
         }
 
         if (loginBots && botLoading.empty())
         {
-            loginBots += updateBots;
+            if (!everyBot)
+                loginBots += updateBots;
             loginBots = std::min(loginBots, maxNewBots);
 
             LOG_DEBUG("playerbots", "{} new bots prepared to login", loginBots);
