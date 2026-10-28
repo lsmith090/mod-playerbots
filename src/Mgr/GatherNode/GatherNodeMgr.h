@@ -30,6 +30,15 @@ struct GatherNodeSpawn
     uint8 threatLevel[2]{0, 0};
 };
 
+// Local patch (agent-wow, patch 50): a spawn that would attack a player of a team, for the walk check. level is its
+// maxlevel per team (TEAM_ALLIANCE, TEAM_HORDE), 0 for a team it leaves alone.
+struct GatherWalkThreat
+{
+    float x{0.0f};
+    float y{0.0f};
+    uint8 level[2]{0, 0};
+};
+
 /// Index of gatherable gameobject spawns (herbs/veins) on continent maps,
 /// built once from sObjectMgr spawn data at world init. Immutable afterwards.
 class GatherNodeMgr
@@ -72,11 +81,23 @@ private:
 
     void LoadThreats();
 
+    // Local patch (agent-wow, patch 50): no spawn above the bot's level plus safeGap within width yd of the straight
+    // line from the bot to the node (2D).
+    bool IsWalkSafe(Player* bot, GatherNodeSpawn const& node, uint32 safeGap, float width) const;
+
+    // Local patch (agent-wow, patch 50): sorts candidates nearest first and keeps at their front the first `want`
+    // whose walk is safe (all of them, unsorted past `want`, when the walk check is off). Returns how many it kept.
+    uint32 KeepNearest(Player* bot, std::vector<std::pair<float, GatherNodeSpawn const*>>& candidates, uint32 want,
+                       uint32 safeGap) const;
+
     std::vector<GatherNodeSpawn> const* GetZoneNodes(uint32 mapId, uint32 zoneId) const;
 
     // Bucketed per zone so the zone-scoped queries (HasUsableNodes,
     // GetNextNode) touch only the bot's zone instead of the whole continent.
     std::unordered_map<uint32 /*mapId*/, std::unordered_map<uint32 /*zoneId*/, std::vector<GatherNodeSpawn>>> _nodes;
+
+    // Local patch (agent-wow, patch 50): the hostile spawns of the node maps, by patch 47's 30 yd ThreatCell.
+    std::unordered_map<uint64, std::vector<GatherWalkThreat>> _walkThreats;
 };
 
 #define sGatherNodeMgr GatherNodeMgr::instance()

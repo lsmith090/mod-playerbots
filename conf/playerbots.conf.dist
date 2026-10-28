@@ -1726,6 +1726,12 @@ Playerbots.RpgStatusProbWeight.DoGather = 15
 # Default: 0 (disabled)
 Playerbots.RandomBotGatherSafeGap = 0
 
+# Local patch (agent-wow, patch 50): with RandomBotGatherSafeGap on, a gathering bot also skips a node when a hostile
+# spawn more than that many levels above it stands within this many yd of the straight walk from the bot to the node.
+# At most 25 (the 30 yd cells of the spawn index, sampled every 10 yd). The walks are checked nearest node first.
+# Default: 0 (disabled)
+Playerbots.RandomBotGatherSafeWalk = 0
+
 # Bots' minimum and maximum level when teleporting in and out of a zone, according to the new RPG strategy
 # Format: Playerbots.ZoneBracket.zoneID = minLevel,maxLevel
 #

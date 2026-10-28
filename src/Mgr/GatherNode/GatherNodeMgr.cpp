@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 #include "Config.h"
 #include "DBCStores.h"
@@ -69,6 +70,21 @@ int32 ThreatCellOf(float coord) { return int32(std::floor(coord / GATHER_THREAT_
 
 // Read once per call, not per node: 0 is off.
 uint32 SafeGap() { return sConfigMgr->GetOption<uint32>("Playerbots.RandomBotGatherSafeGap", 0); }
+
+// Local patch (agent-wow, patch 50): the walk is sampled every 10 yd, and each sample reads its cell and the 8 around
+// it, which cover 30 yd from any point of the cell. A point of the line is within 5 yd of a sample, so a corridor of up
+// to 25 yd is found whole.
+constexpr float GATHER_WALK_STEP = 10.0f;
+
+// The corridor's half-width in yd, 0 when the walk check is off. Read once per call; it needs the gap on.
+float WalkWidth(uint32 safeGap)
+{
+    if (!safeGap)
+        return 0.0f;
+
+    float width = sConfigMgr->GetOption<float>("Playerbots.RandomBotGatherSafeWalk", 0.0f);
+    return std::clamp(width, 0.0f, GATHER_THREAT_RADIUS - GATHER_WALK_STEP / 2);
+}
 }
 
 void GatherNodeMgr::Load()
@@ -162,6 +178,7 @@ void GatherNodeMgr::LoadThreats()
         return;
 
     float const radiusSq = GATHER_THREAT_RADIUS * GATHER_THREAT_RADIUS;
+    uint32 walkThreats = 0;
     for (auto const& [spawnId, data] : sObjectMgr->GetAllCreatureData())
     {
         if (cells.empty())
@@ -181,6 +198,15 @@ void GatherNodeMgr::LoadThreats()
             bool hostile[2] = {faction->IsHostileTo(*players[0]), faction->IsHostileTo(*players[1])};
             if (!hostile[0] && !hostile[1])
                 continue;
+
+            // Local patch (agent-wow, patch 50): the same spawns, for the walk to a node.
+            if (_nodes.contains(data.mapid))
+            {
+                _walkThreats[ThreatCell(data.mapid, ThreatCellOf(data.posX), ThreatCellOf(data.posY))].push_back(
+                    {data.posX, data.posY,
+                     {uint8(hostile[0] ? info->maxlevel : 0), uint8(hostile[1] ? info->maxlevel : 0)}});
+                ++walkThreats;
+            }
 
             WorldPosition pos(data.mapid, data.posX, data.posY, data.posZ);
             int32 cx = ThreatCellOf(data.posX);
@@ -213,6 +239,87 @@ void GatherNodeMgr::LoadThreats()
 
     LOG_INFO("playerbots", "[gather] {} of {} gather nodes have a hostile spawn within {} yd, in {} ms", threatened,
              total, GATHER_THREAT_RADIUS, GetMSTimeDiffToNow(oldMSTime));
+    LOG_INFO("playerbots", "[gather] walk index: {} hostile spawns in {} cells of {} yd", walkThreats,
+             _walkThreats.size(), GATHER_THREAT_RADIUS);
+}
+
+// Local patch (agent-wow, patch 50): patch 47 left the walk to a node open. Of the gather state's fights read 10-28
+// 00:30-06:50Z, aggro on the move killed 176 in 680, 141 of them level 1-4 bots, and almost all from 3+ levels above.
+// 99% of those fatal aggros began within 25 yd of the bot. A straight line stands for MoveFarTo's path.
+bool GatherNodeMgr::IsWalkSafe(Player* bot, GatherNodeSpawn const& node, uint32 safeGap, float width) const
+{
+    TeamId team = bot->GetTeamId();
+    if (team >= TEAM_NEUTRAL)
+        return true;
+
+    uint32 maxLevel = bot->GetLevel() + safeGap;
+    uint32 mapId = bot->GetMapId();
+    float ax = bot->GetPositionX();
+    float ay = bot->GetPositionY();
+    float vx = node.pos.GetPositionX() - ax;
+    float vy = node.pos.GetPositionY() - ay;
+    float lenSq = vx * vx + vy * vy;
+    float widthSq = width * width;
+    uint32 steps = std::max<uint32>(1, uint32(std::ceil(std::sqrt(lenSq) / GATHER_WALK_STEP)));
+
+    // A sample in the same cell as the one before reads the same nine cells.
+    int32 lastX = INT32_MIN;
+    int32 lastY = INT32_MIN;
+    for (uint32 i = 0; i <= steps; ++i)
+    {
+        float f = float(i) / steps;
+        int32 cx = ThreatCellOf(ax + vx * f);
+        int32 cy = ThreatCellOf(ay + vy * f);
+        if (cx == lastX && cy == lastY)
+            continue;
+
+        lastX = cx;
+        lastY = cy;
+        for (int32 dx = -1; dx <= 1; ++dx)
+            for (int32 dy = -1; dy <= 1; ++dy)
+            {
+                auto itr = _walkThreats.find(ThreatCell(mapId, cx + dx, cy + dy));
+                if (itr == _walkThreats.end())
+                    continue;
+
+                for (GatherWalkThreat const& threat : itr->second)
+                {
+                    if (threat.level[team] <= maxLevel)
+                        continue;
+
+                    float u = lenSq > 0.0f ? std::clamp(((threat.x - ax) * vx + (threat.y - ay) * vy) / lenSq, 0.0f, 1.0f)
+                                           : 0.0f;
+                    float ex = ax + u * vx - threat.x;
+                    float ey = ay + u * vy - threat.y;
+                    if (ex * ex + ey * ey <= widthSq)
+                        return false;
+                }
+            }
+    }
+
+    return true;
+}
+
+uint32 GatherNodeMgr::KeepNearest(Player* bot, std::vector<std::pair<float, GatherNodeSpawn const*>>& candidates,
+                                  uint32 want, uint32 safeGap) const
+{
+    auto nearer = [](auto const& a, auto const& b) { return a.first < b.first; };
+    float width = WalkWidth(safeGap);
+    if (!width)
+    {
+        uint32 count = std::min<uint32>(want, candidates.size());
+        std::partial_sort(candidates.begin(), candidates.begin() + count, candidates.end(), nearer);
+        return count;
+    }
+
+    // Nearest first, so a pick walk-checks a few lines, not the zone's every node.
+    std::sort(candidates.begin(), candidates.end(), nearer);
+    uint32 kept = 0;
+    for (size_t i = 0; i < candidates.size() && kept < want; ++i)
+        if (IsWalkSafe(bot, *candidates[i].second, safeGap, width))
+            candidates[kept++] = candidates[i];
+
+    return kept;
 }
 
 bool GatherNodeMgr::IsUsable(PlayerbotAI* botAI, Player* bot, GatherNodeSpawn const& node, uint32 safeGap)
@@ -248,12 +355,15 @@ bool GatherNodeMgr::HasUsableNodes(Player* bot)
     if (!botAI)
         return false;
 
+    // Local patch (agent-wow, patch 50): a usable node counts only with a safe walk to it.
+    WorldPosition botPos(bot);
+    std::vector<std::pair<float, GatherNodeSpawn const*>> candidates;
     uint32 safeGap = SafeGap();
     for (GatherNodeSpawn const& node : *nodes)
         if (IsUsable(botAI, bot, node, safeGap))
-            return true;
+            candidates.push_back({botPos.sqDistance(node.pos), &node});
 
-    return false;
+    return KeepNearest(bot, candidates, 1, safeGap) > 0;
 }
 
 GatherNodeSpawn const* GatherNodeMgr::GetNextNode(Player* bot, std::unordered_set<ObjectGuid::LowType> const& visited)
@@ -285,12 +395,10 @@ GatherNodeSpawn const* GatherNodeMgr::GetNextNode(Player* bot, std::unordered_se
         candidates.push_back({botPos.sqDistance(node.pos), &node});
     }
 
-    if (candidates.empty())
+    // Local patch (agent-wow, patch 50): the nearest four with a safe walk.
+    uint32 nearestCount = KeepNearest(bot, candidates, 4, safeGap);
+    if (!nearestCount)
         return nullptr;
-
-    uint32 nearestCount = std::min<uint32>(4, candidates.size());
-    std::partial_sort(candidates.begin(), candidates.begin() + nearestCount, candidates.end(),
-                      [](auto const& a, auto const& b) { return a.first < b.first; });
 
     return candidates[urand(0, nearestCount - 1)].second;
 }
@@ -331,6 +439,7 @@ GatherNodeSpawn const* GatherNodeMgr::GetNearestLiveNode(Player* bot,
     GatherNodeSpawn const* nearest = nullptr;
     float nearestDistSq = radius * radius;
     uint32 safeGap = SafeGap();
+    float width = WalkWidth(safeGap);
     // All zone buckets of the map: this query is deliberately not
     // zone-scoped, and a radius this small prunes nearly everything on the
     // cheap distance check.
@@ -349,6 +458,10 @@ GatherNodeSpawn const* GatherNodeMgr::GetNearestLiveNode(Player* bot,
                 continue;
 
             if (!FindLiveNode(map, node.spawnId))
+                continue;
+
+            // Local patch (agent-wow, patch 50): within this radius the walk is a few cells.
+            if (width && !IsWalkSafe(bot, node, safeGap, width))
                 continue;
 
             nearest = &node;
