@@ -355,10 +355,19 @@ bool GatherNodeMgr::HasUsableNodes(Player* bot)
     if (!botAI)
         return false;
 
-    // Local patch (agent-wow, patch 50): a usable node counts only with a safe walk to it.
+    uint32 safeGap = SafeGap();
+    if (!WalkWidth(safeGap))
+    {
+        for (GatherNodeSpawn const& node : *nodes)
+            if (IsUsable(botAI, bot, node, safeGap))
+                return true;
+
+        return false;
+    }
+
+    // Local patch (agent-wow, patch 50): with the walk check on, a usable node counts only with a safe walk to it.
     WorldPosition botPos(bot);
     std::vector<std::pair<float, GatherNodeSpawn const*>> candidates;
-    uint32 safeGap = SafeGap();
     for (GatherNodeSpawn const& node : *nodes)
         if (IsUsable(botAI, bot, node, safeGap))
             candidates.push_back({botPos.sqDistance(node.pos), &node});
