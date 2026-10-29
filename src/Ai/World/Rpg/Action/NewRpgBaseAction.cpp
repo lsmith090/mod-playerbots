@@ -1508,7 +1508,9 @@ static float NearestPlayer(uint32 mapId, Position const& pos)
 bool NewRpgBaseAction::RelocateStranded()
 {
     uint32 const hours = sPlayerbotAIConfig.RandomBotRelocate;
-    if (!hours || !sRandomPlayerbotMgr.IsRandomBot(bot) || bot->GetGroup() || bot->IsInCombat() || !bot->IsAlive() ||
+    // a bot holding an invite it hasn't answered is never moved (the ruling: never on an invite)
+    if (!hours || !sRandomPlayerbotMgr.IsRandomBot(bot) || bot->GetGroup() || bot->GetGroupInvite() || bot->IsInCombat() ||
+        !bot->IsAlive() ||
         bot->GetTransport() || bot->IsInFlight())
         return false;
 
@@ -1613,12 +1615,12 @@ bool NewRpgBaseAction::SelectRandomFlightTaxiNode(uint32& flightMasterEntry, Wor
 
 bool NewRpgBaseAction::RandomChangeStatus(std::vector<NewRpgStatus> candidateStatus)
 {
-    // agent-wow local patch (#2954): an outgrown bot walks the ladder before it draws a status (at a level-up too: the
-    // bot is idle once its fight or its goal ends)
     // agent-wow local patch (#3159): a stranded or stuck bot is moved unseen before anything else
     if (RelocateStranded())
         return true;
 
+    // agent-wow local patch (#2954): an outgrown bot walks the ladder before it draws a status (at a level-up too: the
+    // bot is idle once its fight or its goal ends)
     WorldPosition ladder = SelectLadderHubPos();
     if (ladder != WorldPosition())
     {
