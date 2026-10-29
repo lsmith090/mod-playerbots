@@ -59,6 +59,8 @@ namespace
 {
 std::mutex pathLock;  // bots of different maps update on different threads
 std::map<ObjectGuid, time_t> pathLogged;  // ponytail: never pruned; one time_t per bot ever seen
+// agent-wow (#2954): each bot's path-danger holds on the way to its present goal (Playerbots.RandomBotPathDangerHoldTries)
+std::map<ObjectGuid, std::pair<WorldPosition, uint32>> pathHolds;  // ponytail: never pruned, as pathLogged
 
 // agent-wow: the first mob that would aggro the bot on a walk through these points (Playerbots.RandomBotPathDanger).
 // The walk is sampled every 8 yd for its first 120 yd: farther than that the bot sees nothing. A bot that already
@@ -274,6 +276,35 @@ bool NewRpgBaseAction::MoveFarTo(WorldPosition dest)
 
         if (hold <= 0)
             return false;
+
+        // agent-wow (#2954, step 3a): a mob that stands on the way (a rare at its spot, a camp) holds the bot again every
+        // hold, for as long as it stands there: read 10-28/29 with hold 0, 47 walks stayed in sight of one for 2+ minutes
+        // and 3 for 5+. After RandomBotPathDangerHoldTries holds on the way to one goal the bot gives that goal up and
+        // picks another where it stands, as a player who sees the way blocked does. 0 holds without end, as before.
+        int32 const tries = sConfigMgr->GetOption<int32>("Playerbots.RandomBotPathDangerHoldTries", 0);
+        if (tries > 0)
+        {
+            uint32 holds;
+            {
+                std::lock_guard<std::mutex> guard(pathLock);
+                std::pair<WorldPosition, uint32>& mine = pathHolds[bot->GetGUID()];
+                if (mine.first != dest)
+                    mine = {dest, 0};
+                holds = ++mine.second;
+            }
+            if (holds > uint32(tries))
+            {
+                LOG_INFO("playerbots", "[path] {} gives up on {:.0f}, {:.0f} after {} holds: {} (L{}) stays on its way",
+                         bot->GetName(), dest.GetPositionX(), dest.GetPositionY(), tries, mob->GetName(), mob->GetLevel());
+                {
+                    std::lock_guard<std::mutex> guard(pathLock);
+                    pathHolds.erase(bot->GetGUID());
+                }
+                bot->StopMoving();
+                botAI->rpgInfo.ChangeToIdle();
+                return true;
+            }
+        }
 
         bot->StopMoving();
         ForceToWait(uint32(hold) * IN_MILLISECONDS);
