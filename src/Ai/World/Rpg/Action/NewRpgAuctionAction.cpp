@@ -6,6 +6,8 @@
 
 #include "NewRpgAuctionAction.h"
 
+#include <map>
+#include <mutex>
 #include <vector>
 
 #include "AuctionHouseMgr.h"
@@ -88,15 +90,48 @@ bool Enabled(PlayerbotAI* botAI)
     return KeyOn() && sRandomPlayerbotMgr.IsRandomBot(botAI->GetBot()) && !botAI->GetMaster();
 }
 
+// agent-wow local patch (#2955): the auction mail waiting for the bot, as one number that changes when a letter comes or
+// goes, money is taken or an item moves; 0 when there is none
+uint64 Waiting(Player* bot, time_t now)
+{
+    uint64 waiting = 0;
+    for (Mail* mail : bot->GetMails())
+    {
+        if (!mail || mail->messageType != MAIL_AUCTION || mail->state == MAIL_STATE_DELETED || mail->deliver_time > now ||
+            (!mail->money && mail->items.empty()))
+            continue;
+
+        waiting = waiting * 1000003 + mail->messageID + mail->money;
+        for (MailItemInfo const& item : mail->items)
+            waiting = waiting * 31 + item.item_guid;
+    }
+    return waiting;
+}
+
+// What each bot's last take at a mailbox asked for, and when (Playerbots.RandomBotAuctionMailWait)
+std::mutex takeLock;
+std::map<ObjectGuid, std::pair<uint64, time_t>> lastTake;  // ponytail: never pruned; one entry per bot that took mail
+
 bool HasMail(Player* bot)
 {
     time_t const now = GameTime::GetGameTime().count();
-    for (Mail* mail : bot->GetMails())
-        if (mail && mail->messageType == MAIL_AUCTION && mail->state != MAIL_STATE_DELETED && mail->deliver_time <= now &&
-            (mail->money || !mail->items.empty()))
-            return true;
+    uint64 const waiting = Waiting(bot, now);
+    if (!waiting)
+        return false;
 
-    return false;
+    // agent-wow local patch (#2955): a take the core refused (full bags, a unique item it already has) leaves the same
+    // mail waiting, and the bot walked back for it every 60-90 s (Silyssae: 546 trips in 15.7 h, the same 14 items each
+    // time). The same mail as its last take doesn't send it back until RandomBotAuctionMailWait seconds have passed;
+    // new mail or money does at once. 0 goes back every time, as before.
+    int32 const wait = sConfigMgr->GetOption<int32>("Playerbots.RandomBotAuctionMailWait", 0);
+    if (wait > 0)
+    {
+        std::lock_guard<std::mutex> guard(takeLock);
+        auto const it = lastTake.find(bot->GetGUID());
+        if (it != lastTake.end() && it->second.first == waiting && now - it->second.second < wait)
+            return false;
+    }
+    return true;
 }
 
 uint32 Pieces(Player* bot)
@@ -259,6 +294,17 @@ bool TakeAuctionMailAction::Execute(Event /*event*/)
         return false;
 
     time_t const now = GameTime::GetGameTime().count();
+    // agent-wow local patch (#2955): what this take asks for, kept so the same mail doesn't send the bot back at once
+    if (int32 const wait = sConfigMgr->GetOption<int32>("Playerbots.RandomBotAuctionMailWait", 0); wait > 0)
+    {
+        uint64 const waiting = BotAuction::Waiting(bot, now);
+        std::lock_guard<std::mutex> guard(BotAuction::takeLock);
+        auto& last = BotAuction::lastTake[bot->GetGUID()];
+        if (last.first == waiting && waiting)
+            LOG_INFO("playerbots", "[AH mail] {} finds the same auction mail its last visit couldn't take: waits {} s before the next trip",
+                     bot->GetName(), wait);
+        last = {waiting, now};
+    }
     uint32 money = 0, items = 0;
     for (Mail* mail : bot->GetMails())
     {
