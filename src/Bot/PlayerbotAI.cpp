@@ -540,7 +540,7 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
 
     // agent-wow (#3144): a random bot on a boat under way holds still until it reaches a stop. It walked off the deck
     // on a wander or a rest before. At a stop it steps off, unless this shore is a climb from the far one (Booty Bay for
-    // a level 5 from Ratchet): then it stays aboard for the ride back. A fight on board still runs.
+    // a level 5 from Ratchet): then it stays aboard for the ride back. A fight on board still runs, from where the bot stands (below).
     if (MotionTransport* boat = AsBoat(bot->GetTransport()))
     {
         if (!bot->IsInCombat() && sConfigMgr->GetOption<bool>("Playerbots.RandomBotBoatBand", false) &&
@@ -565,6 +565,21 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
 
     // Update internal AI
     UpdateAIInternal(elapsed, minimal);
+
+    // agent-wow (#3144): a random bot in a fight on a boat under way fights from where it stands. A flee or a walk (a
+    // point or a follow) off a moving deck is the same death as the walk-off, so only a chase is kept.
+    if (MotionTransport* boat = AsBoat(bot->GetTransport()))
+    {
+        MovementGeneratorType const moving = bot->GetMotionMaster()->GetCurrentMovementGeneratorType();
+        if (bot->IsInCombat() && moving != IDLE_MOTION_TYPE && moving != CHASE_MOTION_TYPE && !AtStop(bot, boat) &&
+            sConfigMgr->GetOption<bool>("Playerbots.RandomBotBoatBand", false) && sRandomPlayerbotMgr.IsRandomBot(bot) &&
+            GetRealPlayersInGroup().empty())
+        {
+            bot->GetMotionMaster()->Clear();
+            bot->GetMotionMaster()->MoveIdle();
+            bot->StopMovingOnCurrentPos();
+        }
+    }
     YieldThread(bot, GetReactDelay());
 }
 
