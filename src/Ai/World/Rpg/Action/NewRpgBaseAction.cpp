@@ -13,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -1535,6 +1536,9 @@ bool NewRpgBaseAction::RelocateStranded()
     std::vector<WorldLocation> const hubs = sTravelMgr.GetTravelHubs(bot);
     for (WorldLocation const& hub : hubs)
     {
+        if (std::find(sPlayerbotAIConfig.RandomBotMaps.begin(), sPlayerbotAIConfig.RandomBotMaps.end(), hub.GetMapId()) ==
+            sPlayerbotAIConfig.RandomBotMaps.end())
+            continue;
         float const dis = hub.GetMapId() == bot->GetMapId() ? bot->GetExactDist(hub) : FLT_MAX / 2;
         if (dis < 50.0f || dis >= best)
             continue;
@@ -1554,11 +1558,17 @@ bool NewRpgBaseAction::RelocateStranded()
         stuckSpots.erase(bot->GetGUID());
     }
     float const nearest = std::min(here, destNear);
-    LOG_INFO("playerbots", "[relocate] {} (L{}) zone {} -> hub ({:.0f}, {:.0f}, map {}), {}: {}", bot->GetName(),
-             bot->GetLevel(), bot->GetZoneId(), dest->GetPositionX(), dest->GetPositionY(), dest->GetMapId(),
+    // the hub's zone only on the bot's own map: another map's terrain isn't read from this thread
+    std::string const destZone = dest->GetMapId() == bot->GetMapId()
+                                     ? fmt::format("zone {}", bot->GetMap()->GetZoneId(bot->GetPhaseMask(), dest->GetPositionX(),
+                                                                                       dest->GetPositionY(), dest->GetPositionZ()))
+                                     : fmt::format("map {}", dest->GetMapId());
+    LOG_INFO("playerbots", "[relocate] {} (L{}) zone {} -> hub ({:.0f}, {:.0f}, {}), {}: {}", bot->GetName(),
+             bot->GetLevel(), bot->GetZoneId(), dest->GetPositionX(), dest->GetPositionY(), destZone,
              stranded ? "stranded" : "stuck",
              nearest == FLT_MAX ? std::string("no player on either map")
                                 : fmt::format("{:.0f} yd from nearest player", nearest));
+    // as patch 52's stuck teleport did from this action before it (no botAI->Reset inside an action's Execute)
     bot->GetMotionMaster()->Clear();
     bot->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED | AURA_INTERRUPT_FLAG_CHANGE_MAP);
     bot->TeleportTo(dest->GetMapId(), dest->GetPositionX(), dest->GetPositionY(), dest->GetPositionZ(),
