@@ -60,6 +60,7 @@ protected:
     static WorldPosition SelectRandomGrindPos(Player* bot);
     static WorldPosition SelectRandomCampPos(Player* bot);
     WorldPosition SelectLadderHubPos();
+    bool RelocateStranded();
     static bool TakeIslandTrigger(Player* bot, WorldPosition const& reached);
     bool SelectRandomFlightTaxiNode(uint32& flightMasterEntry, WorldPosition& flightMasterPos, std::vector<uint32>& path);
     bool RandomChangeStatus(std::vector<NewRpgStatus> candidateStatus);

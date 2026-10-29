@@ -189,6 +189,7 @@ bool PlayerbotAIConfig::Initialize()
     RandomBotGuildNearby = sConfigMgr->GetOption<bool>("Playerbots.RandomBotGuildNearby", false);
     RandomBotInvitePlayer = sConfigMgr->GetOption<bool>("Playerbots.RandomBotInvitePlayer", false);
     InviteChat = sConfigMgr->GetOption<bool>("Playerbots.InviteChat", false);
+    RandomBotRelocate = sConfigMgr->GetOption<uint32>("Playerbots.RandomBotRelocate", 0);
 
     RandomBotMapsAsString = sConfigMgr->GetOption<std::string>("Playerbots.RandomBotMaps", "0,1,530,571");
     LoadList<std::vector<uint32>>(RandomBotMapsAsString, RandomBotMaps);

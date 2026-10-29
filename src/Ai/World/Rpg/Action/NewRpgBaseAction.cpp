@@ -65,6 +65,10 @@ std::map<ObjectGuid, time_t> pathLogged;  // ponytail: never pruned; one time_t 
 std::map<ObjectGuid, std::pair<WorldPosition, uint32>> pathHolds;  // ponytail: never pruned, as pathLogged
 // agent-wow (#2954): when the ladder walk last picked a goal for each bot (Playerbots.RandomBotLadderWalk)
 std::map<ObjectGuid, uint32> ladderPicked;  // ponytail: never pruned, as pathLogged
+// agent-wow (#3159): each bot's stuck give-ups at one spot (patch 52): where the first was, when, and how many
+std::map<ObjectGuid, std::tuple<WorldPosition, time_t, uint32>> stuckSpots;  // ponytail: never pruned, as pathLogged
+// agent-wow (#3159): when each bot was last moved unseen (Playerbots.RandomBotRelocate)
+std::map<ObjectGuid, time_t> relocated;  // ponytail: never pruned, as pathLogged
 
 // agent-wow: the first mob that would aggro the bot on a walk through these points (Playerbots.RandomBotPathDanger).
 // The walk is sampled every 8 yd for its first 120 yd: farther than that the bot sees nothing. A bot that already
@@ -384,6 +388,19 @@ bool NewRpgBaseAction::MoveFarTo(WorldPosition dest)
             LOG_INFO("playerbots", "[stuck] {} gives up on {:.0f}, {:.0f} after {}s with no progress - Zone: {} ({})",
                      bot->GetName(), dest.GetPositionX(), dest.GetPositionY(), stuckTime / IN_MILLISECONDS,
                      bot->GetZoneId(), zone_name);
+            {
+                // agent-wow (#3159): give-ups within 200 yd of the first, inside an hour, count toward a relocate
+                std::lock_guard<std::mutex> guard(pathLock);
+                auto& [spot, since, count] = stuckSpots[bot->GetGUID()];
+                time_t const now = time(nullptr);
+                if (!count || now - since > HOUR || spot.GetMapId() != bot->GetMapId() || bot->GetExactDist(spot) > 200.0f)
+                {
+                    spot = WorldPosition(bot);
+                    since = now;
+                    count = 0;
+                }
+                ++count;
+            }
             bot->StopMoving();
             botAI->rpgInfo.ChangeToIdle();
             return false;
@@ -1469,6 +1486,87 @@ WorldPosition NewRpgBaseAction::SelectLadderHubPos()
     return dest;
 }
 
+// agent-wow (#3159): the nearest player to `pos` on `mapId` (GMs counted, seen or not), FLT_MAX if none. The list is
+// RandomPlayerbotMgr's of every player that isn't a random bot: people, pilots and their own bots.
+static float NearestPlayer(uint32 mapId, Position const& pos)
+{
+    float nearest = FLT_MAX;
+    for (Player* player : sRandomPlayerbotMgr.GetPlayers())
+        if (player && player->IsInWorld() && player->GetMapId() == mapId)
+            nearest = std::min(nearest, player->GetExactDist2d(pos));
+    return nearest;
+}
+
+// agent-wow local patch (Logan's ruling, 2026-10-29 18:56Z, #3159): an unseen move for a stranded or stuck random bot,
+// which narrows the 10-13 no-teleport ruling. Stranded: its level is 3 or more below where its zone's band starts,
+// outside a starting zone (their bands start at 5). Stuck: patch 52 gave up 3 times within 200 yd in an hour, so the
+// bot can't leave the spot (one give-up is a goal past a wall). It moves only ungrouped, out of a fight, on foot, with
+// no player within 150 yd of where it stands or of the hub, and at most once every Playerbots.RandomBotRelocate hours.
+// The hub is go camp's list for its level and faction: the nearest on its map, else the first on another. A level-up
+// only raises a bot toward its band, so it never starts a move.
+bool NewRpgBaseAction::RelocateStranded()
+{
+    uint32 const hours = sPlayerbotAIConfig.RandomBotRelocate;
+    if (!hours || !sRandomPlayerbotMgr.IsRandomBot(bot) || bot->GetGroup() || bot->IsInCombat() || !bot->IsAlive() ||
+        bot->GetTransport() || bot->IsInFlight())
+        return false;
+
+    uint32 const bandLow = sTravelMgr.ZoneBandLow(bot->GetZoneId());
+    bool const stranded = bandLow > 5 && bot->GetLevel() + 3 <= bandLow;
+    bool stuck = false;
+    time_t const now = time(nullptr);
+    {
+        std::lock_guard<std::mutex> guard(pathLock);
+        auto const last = relocated.find(bot->GetGUID());
+        if (last != relocated.end() && now - last->second < time_t(hours) * HOUR)
+            return false;
+        auto const spot = stuckSpots.find(bot->GetGUID());
+        stuck = spot != stuckSpots.end() && std::get<2>(spot->second) >= 3 && now - std::get<1>(spot->second) <= HOUR;
+    }
+    if (!stranded && !stuck)
+        return false;
+
+    float const here = NearestPlayer(bot->GetMapId(), *bot);
+    if (here < 150.0f)
+        return false;
+
+    WorldLocation const* dest = nullptr;
+    float destNear = FLT_MAX, best = FLT_MAX;
+    std::vector<WorldLocation> const hubs = sTravelMgr.GetTravelHubs(bot);
+    for (WorldLocation const& hub : hubs)
+    {
+        float const dis = hub.GetMapId() == bot->GetMapId() ? bot->GetExactDist(hub) : FLT_MAX / 2;
+        if (dis < 50.0f || dis >= best)
+            continue;
+        float const there = NearestPlayer(hub.GetMapId(), hub);
+        if (there < 150.0f)
+            continue;
+        best = dis;
+        dest = &hub;
+        destNear = there;
+    }
+    if (!dest)
+        return false;
+
+    {
+        std::lock_guard<std::mutex> guard(pathLock);
+        relocated[bot->GetGUID()] = now;
+        stuckSpots.erase(bot->GetGUID());
+    }
+    float const nearest = std::min(here, destNear);
+    LOG_INFO("playerbots", "[relocate] {} (L{}) zone {} -> hub ({:.0f}, {:.0f}, map {}), {}: {}", bot->GetName(),
+             bot->GetLevel(), bot->GetZoneId(), dest->GetPositionX(), dest->GetPositionY(), dest->GetMapId(),
+             stranded ? "stranded" : "stuck",
+             nearest == FLT_MAX ? std::string("no player on either map")
+                                : fmt::format("{:.0f} yd from nearest player", nearest));
+    bot->GetMotionMaster()->Clear();
+    bot->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED | AURA_INTERRUPT_FLAG_CHANGE_MAP);
+    bot->TeleportTo(dest->GetMapId(), dest->GetPositionX(), dest->GetPositionY(), dest->GetPositionZ(),
+                    dest->GetOrientation());
+    botAI->rpgInfo.ChangeToIdle();
+    return true;
+}
+
 bool NewRpgBaseAction::SelectRandomFlightTaxiNode(uint32& flightMasterEntry, WorldPosition& flightMasterPos, std::vector<uint32>& path)
 {
     TravelMgr::FlightMasterInfo const* info = sTravelMgr.GetNearestFlightMasterInfo(bot);
@@ -1507,6 +1605,10 @@ bool NewRpgBaseAction::RandomChangeStatus(std::vector<NewRpgStatus> candidateSta
 {
     // agent-wow local patch (#2954): an outgrown bot walks the ladder before it draws a status (at a level-up too: the
     // bot is idle once its fight or its goal ends)
+    // agent-wow local patch (#3159): a stranded or stuck bot is moved unseen before anything else
+    if (RelocateStranded())
+        return true;
+
     WorldPosition ladder = SelectLadderHubPos();
     if (ladder != WorldPosition())
     {
