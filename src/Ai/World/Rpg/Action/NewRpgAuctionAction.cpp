@@ -105,8 +105,9 @@ Spawn const* Nearest(Player* bot, std::vector<Spawn> const& spawns, float& neare
 constexpr uint32 CRAFTS = 5;
 constexpr time_t SESSION = 15 * MINUTE;
 constexpr time_t COOLDOWN = 2 * HOUR;
-constexpr uint16 CRAFTING[] = {SKILL_ALCHEMY,     SKILL_BLACKSMITHING,  SKILL_COOKING,  SKILL_ENGINEERING,
-                               SKILL_FIRST_AID,   SKILL_LEATHERWORKING, SKILL_TAILORING};
+// the primary crafts that make items (Enchanting's recipes mostly don't): every random bot starts with Cooking and
+// First Aid at 1, so the secondaries would make an artisan of every bot
+constexpr uint16 CRAFTING[] = {SKILL_ALCHEMY, SKILL_BLACKSMITHING, SKILL_ENGINEERING, SKILL_LEATHERWORKING, SKILL_TAILORING};
 constexpr uint16 GATHERING[] = {SKILL_HERBALISM, SKILL_MINING, SKILL_SKINNING};
 
 // The reagents to buy: for each crafting profession, the bot's first skill recipe it lacks reagents for, and of each
@@ -417,8 +418,10 @@ bool AhBuyReagentsAction::Execute(Event /*event*/)
         uint32 got = 0;
         for (AuctionEntry const* auction : offers)
         {
-            if (got >= want.count || auction->buyout > budget)
+            if (got >= want.count)
                 break;
+            if (auction->buyout > budget)  // a dearer stack: a smaller one after it may still be affordable
+                continue;
 
             WorldPacket* packet = new WorldPacket(CMSG_AUCTION_PLACE_BID, 8 + 4 + 4);
             *packet << auctioneer->GetGUID() << auction->Id << auction->buyout;
