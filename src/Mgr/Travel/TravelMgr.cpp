@@ -4360,12 +4360,26 @@ void TravelMgr::printObj(WorldObject* obj, std::string const type)
     }
 }
 
+// agent-wow local patch (#3144): each boat stop's zone, read once at Init on the world thread. A bot's map thread may
+// not read another map's terrain (it would create that map's grid), and a boat's far stop is on another map.
+static std::map<std::pair<uint32, uint32>, uint32> boatStopZones;  // (path, index) to zone; read-only after Init
+
 void TravelMgr::Init()
 {
     if (sPlayerbotAIConfig.Enabled)
     {
         PrepareZone2LevelBracket();
         PrepareDestinationCache();
+
+        for (auto const& [entry, goTemplate] : *sObjectMgr->GetGameObjectTemplates())
+        {
+            if (goTemplate.type != GAMEOBJECT_TYPE_MO_TRANSPORT || goTemplate.moTransport.taxiPathId >= sTaxiPathNodesByPath.size())
+                continue;
+            for (TaxiPathNodeEntry const* node : sTaxiPathNodesByPath[goTemplate.moTransport.taxiPathId])
+                if (node->actionFlag == 2)
+                    boatStopZones[{node->path, node->index}] =
+                        sMapMgr->GetZoneId(PHASEMASK_NORMAL, node->mapid, node->x, node->y, node->z);
+        }
     }
     sTravelNodeMap.InitTaxiGraph();
     LOG_INFO("playerbots", "Playerbots Taxi graph and destination cache built.");
@@ -4515,6 +4529,18 @@ bool TravelMgr::OutgrownZone(Player* bot, uint32 zoneId) const
 {
     auto const it = zone2LevelBracket.find(zoneId ? zoneId : bot->GetZoneId());
     return it != zone2LevelBracket.end() && bot->GetLevel() > it->second.high;
+}
+
+uint32 TravelMgr::StopZone(TaxiPathNodeEntry const* node) const
+{
+    auto const it = boatStopZones.find({node->path, node->index});
+    return it != boatStopZones.end() ? it->second : 0;
+}
+
+uint32 TravelMgr::ZoneBandLow(uint32 zoneId) const
+{
+    auto const it = zone2LevelBracket.find(zoneId);
+    return it != zone2LevelBracket.end() ? it->second.low : 0;
 }
 
 std::vector<WorldLocation> TravelMgr::GetCityLocations(Player* bot)

@@ -21,6 +21,7 @@ class GuidPosition;
 class ObjectGuid;
 class Quest;
 class Player;
+struct TaxiPathNodeEntry;
 class PlayerbotAI;
 
 struct QuestStatusData;
@@ -880,6 +881,10 @@ public:
     const std::vector<WorldLocation> GetTravelHubs(Player* bot);
     // agent-wow local patch (#2954): the bot's level is past its zone's band, or `zoneId`'s (a zone with no band never is)
     bool OutgrownZone(Player* bot, uint32 zoneId = 0) const;
+    // agent-wow local patch (#3144): where `zoneId`'s band starts, 0 for a zone with no band
+    uint32 ZoneBandLow(uint32 zoneId) const;
+    // agent-wow local patch (#3144): the zone of a boat's stop (a TaxiPathNode with actionFlag 2), read at Init; 0 if unknown
+    uint32 StopZone(TaxiPathNodeEntry const* node) const;
     std::vector<WorldLocation> GetCityLocations(Player* bot);
     std::vector<uint32> GetFlightNodesInZone(uint32 zoneId, TeamId team, uint32 excludeNode = 0) const;
     bool SelectAuctioneerByMap(Player* bot, NpcLocation& outAuctioneer);

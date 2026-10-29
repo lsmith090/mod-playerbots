@@ -57,10 +57,13 @@
 #include "SpellAuraEffects.h"
 #include "SpellInfo.h"
 #include "Transport.h"
+#include "TravelMgr.h"
 #include "Unit.h"
 #include "UpdateTime.h"
 #include "Vehicle.h"
+#include <cfloat>
 #include <cmath>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -252,6 +255,61 @@ PlayerbotAI::~PlayerbotAI()
         PlayerbotsMgr::instance().RemovePlayerBotData(bot->GetGUID(), true);
 }
 
+// agent-wow local patch (Logan's "Send to Delivery", 2026-10-29, #3144): random bots and the boats. Level 5 Horde bots
+// rode the Ratchet boat to Booty Bay (Stranglethorn's band is 32-47) behind the group drive, and walked off its deck on
+// the way out, by the Bloodsail camp: 9 of 10-29's 18 deaths there came 3-20 s after the bot left the boat. Off unless
+// Playerbots.RandomBotBoatBand. Never for a bot grouped with a player, who takes it where they go.
+namespace
+{
+std::mutex boatLock;                     // bots of different maps update on different threads
+std::map<ObjectGuid, Position> boatShore; // ponytail: never pruned; one Position per bot ever seen
+std::map<ObjectGuid, uint32> boatLogged;  // ponytail: never pruned, as boatShore
+
+MotionTransport* AsBoat(Transport* transport)
+{
+    return transport && transport->GetGOInfo()->type == GAMEOBJECT_TYPE_MO_TRANSPORT
+               ? static_cast<MotionTransport*>(transport)
+               : nullptr;
+}
+
+// The boat is at a stop near the bot: the stop's point is the boat's middle, and a deck is under 40 yd long
+bool AtStop(Player* bot, MotionTransport* boat)
+{
+    for (KeyFrame const& frame : boat->GetKeyFrames())
+        if (frame.IsStopFrame() && frame.Node->mapid == bot->GetMapId() &&
+            bot->GetExactDist2d(frame.Node->x, frame.Node->y) < 40.0f)
+            return true;
+    return false;
+}
+
+// The zone of the boat's far stop: one on another map, else the stop farthest from the bot. 0 if it has none.
+uint32 FarShoreZone(Player* bot, MotionTransport* boat)
+{
+    TaxiPathNodeEntry const* far = nullptr;
+    float farDist = -1.0f;
+    for (KeyFrame const& frame : boat->GetKeyFrames())
+    {
+        if (!frame.IsStopFrame())
+            continue;
+        float const dist = frame.Node->mapid != bot->GetMapId() ? FLT_MAX
+                                                                 : bot->GetExactDist2d(frame.Node->x, frame.Node->y);
+        if (dist > farDist)
+        {
+            farDist = dist;
+            far = frame.Node;
+        }
+    }
+    return far ? sTravelMgr.StopZone(far) : 0;
+}
+
+// The shore `toZone` is a climb for the bot: its band starts above both the bot's level and `fromZone`'s band
+bool Climbs(Player* bot, uint32 fromZone, uint32 toZone)
+{
+    uint32 const toLow = sTravelMgr.ZoneBandLow(toZone);
+    return toLow > bot->GetLevel() && toLow > sTravelMgr.ZoneBandLow(fromZone);
+}
+}  // namespace
+
 void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
 {
     // Handle the AI check delay
@@ -427,7 +485,46 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
         Transport* newTransport = bot->GetMap()->GetTransportForPos(bot->GetPhaseMask(), bot->GetPositionX(),
                                                                     bot->GetPositionY(), bot->GetPositionZ(), bot);
 
-        if (newTransport != bot->GetTransport())
+        bool const boatBand = sConfigMgr->GetOption<bool>("Playerbots.RandomBotBoatBand", false) &&
+                              sRandomPlayerbotMgr.IsRandomBot(bot) && GetRealPlayersInGroup().empty();
+        MotionTransport* boarding = newTransport && !bot->GetTransport() && boatBand ? AsBoat(newTransport) : nullptr;
+        uint32 const shoreZone = boarding ? FarShoreZone(bot, boarding) : 0;
+
+        if (boatBand && !newTransport && !bot->GetTransport())
+        {
+            std::lock_guard<std::mutex> guard(boatLock);
+            boatShore[bot->GetGUID()] = bot->GetPosition();
+        }
+
+        // agent-wow (#3144): a random bot doesn't board for a shore whose band starts above both its level and its
+        // own zone's band (a level 5 at Ratchet for Stranglethorn), so it walks back to where it last stood ashore.
+        // Booty Bay to Ratchet stays open: the Barrens' band starts below Stranglethorn's.
+        if (boarding && Climbs(bot, bot->GetZoneId(), shoreZone))
+        {
+            Position shore;
+            bool logIt = false;
+            {
+                std::lock_guard<std::mutex> guard(boatLock);
+                auto const it = boatShore.find(bot->GetGUID());
+                if (it != boatShore.end())
+                    shore = it->second;
+                uint32& logged = boatLogged[bot->GetGUID()];
+                if (!logged || GetMSTimeDiffToNow(logged) >= MINUTE * IN_MILLISECONDS)
+                {
+                    logged = getMSTime();
+                    logIt = true;
+                }
+            }
+            if (logIt)
+                LOG_INFO("playerbots", "[boat] {} (L{}) won't board {} for zone {} (band from {}): walks back ashore",
+                         bot->GetName(), bot->GetLevel(), boarding->GetName(), shoreZone,
+                         sTravelMgr.ZoneBandLow(shoreZone));
+            rpgInfo.ChangeToIdle();
+            bot->StopMovingOnCurrentPos();
+            if (shore.GetPositionX() != 0.0f || shore.GetPositionY() != 0.0f)
+                bot->GetMotionMaster()->MovePoint(0, shore);
+        }
+        else if (newTransport != bot->GetTransport())
         {
             LOG_DEBUG("playerbots", "Bot {} is on a transport", bot->GetName());
 
@@ -438,6 +535,28 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
                 newTransport->AddPassenger(bot, true);
 
             bot->StopMovingOnCurrentPos();
+        }
+    }
+
+    // agent-wow (#3144): a random bot on a boat under way holds still until it reaches a stop. It walked off the deck
+    // on a wander or a rest before. At a stop it steps off, unless this shore is a climb from the far one (Booty Bay for
+    // a level 5 from Ratchet): then it stays aboard for the ride back. A fight on board still runs.
+    if (MotionTransport* boat = AsBoat(bot->GetTransport()))
+    {
+        if (!bot->IsInCombat() && sConfigMgr->GetOption<bool>("Playerbots.RandomBotBoatBand", false) &&
+            sRandomPlayerbotMgr.IsRandomBot(bot) && GetRealPlayersInGroup().empty() &&
+            (!AtStop(bot, boat) || Climbs(bot, FarShoreZone(bot, boat), bot->GetZoneId())))
+        {
+            // a follow (MoveFollow) runs on in the motion master without the AI, so it is cleared, not just stopped
+            if (bot->GetMotionMaster()->GetCurrentMovementGeneratorType() != IDLE_MOTION_TYPE)
+            {
+                bot->GetMotionMaster()->Clear();
+                bot->GetMotionMaster()->MoveIdle();
+            }
+            if (bot->isMoving())
+                bot->StopMovingOnCurrentPos();
+            YieldThread(bot, GetReactDelay());
+            return;
         }
     }
 

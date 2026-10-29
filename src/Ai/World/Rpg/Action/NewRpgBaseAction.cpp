@@ -1476,6 +1476,22 @@ bool NewRpgBaseAction::SelectRandomFlightTaxiNode(uint32& flightMasterEntry, Wor
         return false;
 
     std::vector<std::vector<uint32>> availablePaths = sTravelMgr.GetOptimalFlightDestinations(bot);
+    // agent-wow local patch (#3144): a flight the bot can't pay for isn't picked. ActivateTaxiPathTo refuses it
+    // (ERR_TAXINOTENOUGHMONEY), and the bot picked the same one again at its next idle: Booty Bay's 630c a leg against
+    // the 1-48c of the level 5s stranded there. The reputation discount is left out, so a bot just short of the full
+    // price isn't offered the flight.
+    if (sConfigMgr->GetOption<bool>("Playerbots.RandomBotBoatBand", false))
+        std::erase_if(availablePaths, [this](std::vector<uint32> const& nodes)
+        {
+            uint32 total = 0;
+            for (size_t i = 1; i < nodes.size(); ++i)
+            {
+                uint32 pathId = 0, cost = 0;
+                sObjectMgr->GetTaxiPath(nodes[i - 1], nodes[i], pathId, cost);
+                total += cost;
+            }
+            return total > bot->GetMoney();
+        });
     if (availablePaths.empty())
         return false;
 
