@@ -275,6 +275,12 @@ bool NewRpgStatusUpdateAction::Execute(Event /*event*/)
             // GO_CAMP -> WANDER_NPC
             if (bot->GetExactDist(originalPos) < 10.0f)
             {
+                // agent-wow local patch (#2954): a ladder walk to one of Teldrassil's two triggers ends through it
+                if (TakeIslandTrigger(bot, originalPos))
+                {
+                    info.ChangeToIdle();
+                    return true;
+                }
                 info.ChangeToWanderNpc();
                 return true;
             }

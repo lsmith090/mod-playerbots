@@ -8,6 +8,7 @@
 #include "AreaDefines.h"
 #include "CellImpl.h"
 #include "ChatHelper.h"
+#include "Config.h"
 #include "Corpse.h"
 #include "Creature.h"
 #include "Log.h"
@@ -4383,6 +4384,11 @@ TravelMgr::FlightMasterInfo const* TravelMgr::GetNearestFlightMasterInfo(Player*
         if (info.pos.GetMapId() != bot->GetMapId())
             continue;
 
+        // agent-wow local patch (#2954): Vesprystus, in the cache under RandomBotTeldrassilLeg, is the nearest in 2D to
+        // the whole tree, 1,200 yd below it: only a bot on the island down at Rut'theran's height takes him
+        if (info.templateEntry == 3838 && (bot->GetZoneId() != AREA_TELDRASSIL || bot->GetPositionZ() > 300.0f))
+            continue;
+
         float distance = bot->GetExactDist2dSq(info.pos);
         if (distance < nearestDistance)
         {
@@ -4720,7 +4726,10 @@ void TravelMgr::PrepareDestinationCache()
         // Entry 3838 is Vesprystus in Rut'Theran. Need Travel Node system to resolve this one.
         else if ((creatureTemplate->npcflag & UNIT_NPC_FLAG_FLIGHTMASTER ||
                   creatureTemplate->npcflag & UNIT_NPC_FLAG_INNKEEPER) &&
-                creatureTemplate->Entry != 3838 && creatureTemplate->Entry != 29480)
+                // agent-wow local patch (#2954): with RandomBotTeldrassilLeg, Vesprystus flies a bot from Rut'theran to
+                // Auberdine; GetNearestFlightMasterInfo keeps him from the bots on the tree above
+                (creatureTemplate->Entry != 3838 || sConfigMgr->GetOption<bool>("Playerbots.RandomBotTeldrassilLeg", false)) &&
+                creatureTemplate->Entry != 29480)
         {
             FactionTemplateEntry const* factionEntry = sFactionTemplateStore.LookupEntry(creatureTemplate->faction);
             bool forHorde = !(factionEntry->hostileMask & 4);

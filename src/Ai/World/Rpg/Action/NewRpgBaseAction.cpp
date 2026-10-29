@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "AreaDefines.h"
 #include "BroadcastHelper.h"
 #include "ChatHelper.h"
 #include "Config.h"
@@ -51,6 +52,7 @@
 #include "SpeechForms.h"
 #include "StatsWeightCalculator.h"
 #include "Timer.h"
+#include "WorldSession.h"
 #include "TestBots.h"
 #include "TravelMgr.h"
 #include "G3D/Vector2.h"
@@ -1375,6 +1377,32 @@ WorldPosition NewRpgBaseAction::SelectRandomCampPos(Player* bot)
 // Off unless Playerbots.RandomBotLadderWalk, and only while the path-danger hold is on (RandomBotPathDangerHold above
 // 0): nothing else holds a long walk back from a mob far above the bot. A goal is picked at most every 20 minutes, so a
 // goal given up (stuck, or held too often) isn't taken again at the next idle. A grouped bot keeps to its group.
+// agent-wow local patch (Logan, 2026-10-29, #2954, his answer 1): the way off Teldrassil and back, as a night elf player
+// goes. Darnassus' area trigger 527 takes a bot down to Rut'theran, where Vesprystus flies it to Auberdine; trigger 542
+// takes it back up. Behind Playerbots.RandomBotTeldrassilLeg, inside the ladder walk's own conditions.
+static uint32 constexpr TRIGGER_DOWN = 527, TRIGGER_UP = 542;
+static float constexpr TREETOP_Z = 300.0f;  // Rut'theran stands at about 25 yd, the tree's top at about 1,300
+
+// The bot has reached one of the two triggers' spots (go camp's arrival): it walks through, and the core moves it.
+bool NewRpgBaseAction::TakeIslandTrigger(Player* bot, WorldPosition const& reached)
+{
+    for (uint32 const id : {TRIGGER_DOWN, TRIGGER_UP})
+    {
+        AreaTrigger const* at = sObjectMgr->GetAreaTrigger(id);
+        if (!at || at->map != reached.GetMapId() || reached.GetExactDist(at->x, at->y, at->z) > 1.0f ||
+            bot->GetDistance(at->x, at->y, at->z) > at->radius)
+            continue;
+
+        LOG_INFO("playerbots", "[ladder] {} (L{}) walks through area trigger {}", bot->GetName(), bot->GetLevel(), id);
+        WorldPacket packet(CMSG_AREATRIGGER);
+        packet << id;
+        packet.rpos(0);
+        bot->GetSession()->HandleAreaTriggerOpcode(packet);
+        return true;
+    }
+    return false;
+}
+
 WorldPosition NewRpgBaseAction::SelectLadderHubPos()
 {
     if (!sConfigMgr->GetOption<bool>("Playerbots.RandomBotLadderWalk", false) ||
@@ -1387,6 +1415,27 @@ WorldPosition NewRpgBaseAction::SelectLadderHubPos()
         auto const it = ladderPicked.find(bot->GetGUID());
         if (it != ladderPicked.end() && GetMSTimeDiffToNow(it->second) < 20 * MINUTE * IN_MILLISECONDS)
             return WorldPosition();
+    }
+
+    uint32 const zone = bot->GetZoneId();
+    if (sConfigMgr->GetOption<bool>("Playerbots.RandomBotTeldrassilLeg", false) && bot->GetMapId() == 1 &&
+        (zone == AREA_TELDRASSIL || zone == AREA_DARNASSUS))
+    {
+        // the island's band is Teldrassil's, Darnassus' too (a capital has none of its own)
+        bool const outgrown = sTravelMgr.OutgrownZone(bot, AREA_TELDRASSIL), below = bot->GetPositionZ() < TREETOP_Z;
+        uint32 const trigger = outgrown && !below ? TRIGGER_DOWN : !outgrown && below ? TRIGGER_UP : 0;
+        if (AreaTrigger const* at = trigger ? sObjectMgr->GetAreaTrigger(trigger) : nullptr)
+        {
+            {
+                std::lock_guard<std::mutex> guard(pathLock);
+                ladderPicked[bot->GetGUID()] = getMSTime();
+            }
+            LOG_INFO("playerbots", "[ladder] {} (L{}) walks to area trigger {} to leave the {}", bot->GetName(),
+                     bot->GetLevel(), trigger, below ? "shore for the tree" : "tree");
+            return WorldPosition(at->map, at->x, at->y, at->z);
+        }
+        if (outgrown && below)
+            return WorldPosition();  // at Rut'theran: the flight, which RandomChangeStatus takes
     }
 
     if (!sTravelMgr.OutgrownZone(bot))
@@ -1448,6 +1497,23 @@ bool NewRpgBaseAction::RandomChangeStatus(std::vector<NewRpgStatus> candidateSta
         botAI->rpgInfo.ChangeToGoCamp(ladder);
         SpeechForms::Going(botAI, ladder);
         return true;
+    }
+
+    // agent-wow local patch (#2954): an outgrown night elf down at Rut'theran flies on, by Vesprystus
+    if (sConfigMgr->GetOption<bool>("Playerbots.RandomBotTeldrassilLeg", false) &&
+        sConfigMgr->GetOption<bool>("Playerbots.RandomBotLadderWalk", false) && sRandomPlayerbotMgr.IsRandomBot(bot) &&
+        !bot->GetGroup() && bot->GetZoneId() == AREA_TELDRASSIL && bot->GetPositionZ() < TREETOP_Z &&
+        sTravelMgr.OutgrownZone(bot))
+    {
+        uint32 flightMasterEntry = 0;
+        WorldPosition flightMasterPos;
+        std::vector<uint32> path;
+        if (SelectRandomFlightTaxiNode(flightMasterEntry, flightMasterPos, path))
+        {
+            LOG_INFO("playerbots", "[ladder] {} (L{}) flies on from Rut'theran", bot->GetName(), bot->GetLevel());
+            botAI->rpgInfo.ChangeToTravelFlight(flightMasterEntry, flightMasterPos, path);
+            return true;
+        }
     }
 
     std::vector<NewRpgStatus> availableStatus;
