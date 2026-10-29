@@ -341,6 +341,18 @@ bool NewRpgBaseAction::MoveFarTo(WorldPosition dest)
         botAI->rpgInfo.stuckAttempts = 0;
         AreaTableEntry const* entry = sAreaTableStore.LookupEntry(bot->GetZoneId());
         std::string zone_name = PlayerbotAI::GetLocalizedAreaName(entry);
+        // agent-wow local patch (Logan, 2026-10-29, #2954): this is a teleport under the 10-13 ruling (patch 27). With
+        // Playerbots.RandomBotStuckStay a bot that makes no progress gives the goal up and picks another where it
+        // stands, as a player who can't get somewhere does. Logged at info, so its rate is read.
+        if (sConfigMgr->GetOption<bool>("Playerbots.RandomBotStuckStay", false))
+        {
+            LOG_INFO("playerbots", "[stuck] {} gives up on {:.0f}, {:.0f} after {}s with no progress - Zone: {} ({})",
+                     bot->GetName(), dest.GetPositionX(), dest.GetPositionY(), stuckTime / IN_MILLISECONDS,
+                     bot->GetZoneId(), zone_name);
+            bot->StopMoving();
+            botAI->rpgInfo.ChangeToIdle();
+            return false;
+        }
         LOG_DEBUG(
             "playerbots",
             "[New RPG] Teleport {} from ({},{},{},{}) to ({},{},{},{}) as it stuck when moving far - Zone: {} ({})",
