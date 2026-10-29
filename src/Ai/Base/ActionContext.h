@@ -296,6 +296,7 @@ public:
         creators["vendor errands"] = &ActionContext::vendor_errands;  // agent-wow local patch
         creators["new rpg go auctioneer"] = &ActionContext::new_rpg_go_auctioneer;  // agent-wow local patch
         creators["ah buy"] = &ActionContext::ah_buy;  // agent-wow local patch
+        creators["ah buy reagents"] = &ActionContext::ah_buy_reagents;  // agent-wow local patch
         creators["new rpg go mailbox"] = &ActionContext::new_rpg_go_mailbox;  // agent-wow local patch
         creators["take auction mail"] = &ActionContext::take_auction_mail;  // agent-wow local patch
         creators["follower quest giver"] = &ActionContext::follower_quest_giver;  // agent-wow local patch
@@ -517,6 +518,7 @@ private:
     static Action* vendor_errands(PlayerbotAI* botAI) { return new VendorErrandsAction(botAI); }
     static Action* new_rpg_go_auctioneer(PlayerbotAI* botAI) { return new NewRpgGoAuctioneerAction(botAI); }
     static Action* ah_buy(PlayerbotAI* botAI) { return new AhBuyAction(botAI); }
+    static Action* ah_buy_reagents(PlayerbotAI* botAI) { return new AhBuyReagentsAction(botAI); }
     static Action* new_rpg_go_mailbox(PlayerbotAI* botAI) { return new NewRpgGoMailboxAction(botAI); }
     static Action* take_auction_mail(PlayerbotAI* botAI) { return new TakeAuctionMailAction(botAI); }
     static Action* follower_quest_giver(PlayerbotAI* botAI) { return new FollowerQuestGiverAction(botAI); }

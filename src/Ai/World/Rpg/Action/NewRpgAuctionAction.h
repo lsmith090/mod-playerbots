@@ -37,6 +37,34 @@ bool HasMail(Player* bot);
 uint32 Pieces(Player* bot);
 }  // namespace BotAuction
 
+// agent-wow local patch (#87 step 2, Logan's rulings 2026-10-22 12:14-13:02Z): the artisans' trade session. A random bot
+// with a crafting profession, or a gatherer carrying goods, with something to do (a skill recipe to buy reagents for or
+// to craft, goods to list) goes to the nearest town with an auction house on its map (patch 26's search, 3,000 yd),
+// else the nearest inn town for crafting only, and stays there up to 15 minutes: patch 2 lists, it bids out reagents,
+// the earned trainer trains, it crafts, patch 26 takes its auction mail. Drawn at weight 20 (WanderNpc's) among the
+// statuses, at most every 2 hours. Off unless Playerbots.RandomBotTradeSession (read once, PlayerbotAIConfig).
+namespace BotTrade
+{
+// "last said" values (no new header for a timestamp): when the next session may start, when this one ends (0 when none
+// runs), and when this session's auction house visit was made
+inline constexpr char const* NEXT_SESSION = "trade next session";
+inline constexpr char const* SESSION_END = "trade session end";
+inline constexpr char const* SHOPPED = "trade session shopped";
+// Playerbots.RpgStatusProbWeight.WanderNpc's default
+inline constexpr uint32 WEIGHT = 20;
+
+// the key is on and the bot is a random bot without a master
+bool Enabled(PlayerbotAI* botAI);
+// a session is under way
+bool Active(PlayerbotAI* botAI);
+// the cooldown has passed (a bot's first one is drawn between 0 and 2 h, so the key turned on sends no wave to town)
+bool Due(PlayerbotAI* botAI);
+// pick the town and start walking there; false when there is nothing to do or no town in reach
+bool Start(PlayerbotAI* botAI);
+// at each idle in a session: the auctioneer's visit, then rest in town while there is work; false once it ends
+bool Stay(PlayerbotAI* botAI);
+}  // namespace BotTrade
+
 // A random bot with money or goods walks to the nearest friendly auctioneer on its map: GO_CAMP to the spawn, then
 // WANDER_NPC with the auctioneer as its visit, where patch 2 lists and AhBuyAction buys.
 class NewRpgGoAuctioneerAction : public Action
@@ -53,6 +81,16 @@ class AhBuyAction : public Action
 {
 public:
     AhBuyAction(PlayerbotAI* botAI) : Action(botAI, "ah buy") {}
+
+    bool Execute(Event event) override;
+};
+
+// At the auctioneer in a trade session, the bot bids out the reagents of its next skill recipe of each profession, a few
+// crafts' worth, cheapest a unit first, from any seller but itself and its own account, with its own money.
+class AhBuyReagentsAction : public Action
+{
+public:
+    AhBuyReagentsAction(PlayerbotAI* botAI) : Action(botAI, "ah buy reagents") {}
 
     bool Execute(Event event) override;
 };

@@ -6,12 +6,15 @@
 
 #include "NewRpgAuctionAction.h"
 
+#include <algorithm>
 #include <map>
 #include <mutex>
 #include <vector>
 
 #include "AuctionHouseMgr.h"
 #include "Bag.h"
+#include "BudgetValues.h"
+#include "CharacterCache.h"
 #include "Config.h"
 #include "Creature.h"
 #include "DBCStores.h"
@@ -21,6 +24,7 @@
 #include "ItemUsageValue.h"
 #include "Mail.h"
 #include "NewRpgInfo.h"
+#include "NewRpgProfessionAction.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
 #include "Playerbots.h"
@@ -44,20 +48,29 @@ struct Spawn
     float x, y, z;
 };
 
+std::vector<Spawn> GatherSpawns(uint32 npcFlag)
+{
+    std::vector<Spawn> result;
+    for (auto const& [spawnId, data] : sObjectMgr->GetAllCreatureData())
+    {
+        CreatureTemplate const* creature = sObjectMgr->GetCreatureTemplate(data.id);
+        if (creature && (creature->npcflag & npcFlag))
+            result.push_back({data.id, data.mapid, data.posX, data.posY, data.posZ});
+    }
+    return result;
+}
+
 // every spawn of an auctioneer, gathered once
 std::vector<Spawn> const& AuctioneerSpawns()
 {
-    static std::vector<Spawn> const spawns = []
-    {
-        std::vector<Spawn> result;
-        for (auto const& [spawnId, data] : sObjectMgr->GetAllCreatureData())
-        {
-            CreatureTemplate const* creature = sObjectMgr->GetCreatureTemplate(data.id);
-            if (creature && (creature->npcflag & UNIT_NPC_FLAG_AUCTIONEER))
-                result.push_back({data.id, data.mapid, data.posX, data.posY, data.posZ});
-        }
-        return result;
-    }();
+    static std::vector<Spawn> const spawns = GatherSpawns(UNIT_NPC_FLAG_AUCTIONEER);
+    return spawns;
+}
+
+// agent-wow (#87 step 2): every spawn of an innkeeper, gathered once
+std::vector<Spawn> const& InnkeeperSpawns()
+{
+    static std::vector<Spawn> const spawns = GatherSpawns(UNIT_NPC_FLAG_INNKEEPER);
     return spawns;
 }
 
@@ -67,6 +80,107 @@ bool HostileFaction(Player* bot, uint32 creatureEntry)
     FactionTemplateEntry const* theirs = creature ? sFactionTemplateStore.LookupEntry(creature->faction) : nullptr;
     FactionTemplateEntry const* ours = bot->GetFactionTemplateEntry();
     return !theirs || !ours || ours->IsHostileTo(*theirs) || theirs->IsHostileTo(*ours);
+}
+
+// the nearest friendly spawn on the bot's map within MAX_WALK, or nullptr
+Spawn const* Nearest(Player* bot, std::vector<Spawn> const& spawns, float& nearestDist)
+{
+    Spawn const* nearest = nullptr;
+    for (Spawn const& spawn : spawns)
+    {
+        if (spawn.mapId != bot->GetMapId())
+            continue;
+
+        float const dist = bot->GetExactDist(spawn.x, spawn.y, spawn.z);
+        if (dist > MAX_WALK || (nearest && dist >= nearestDist) || HostileFaction(bot, spawn.entry))
+            continue;
+
+        nearest = &spawn;
+        nearestDist = dist;
+    }
+    return nearest;
+}
+
+// a few crafts' worth: enough to make the trip pay, little enough that one bot doesn't clear a seller's stock
+constexpr uint32 CRAFTS = 5;
+constexpr time_t SESSION = 15 * MINUTE;
+constexpr time_t COOLDOWN = 2 * HOUR;
+constexpr uint16 CRAFTING[] = {SKILL_ALCHEMY,     SKILL_BLACKSMITHING,  SKILL_COOKING,  SKILL_ENGINEERING,
+                               SKILL_FIRST_AID,   SKILL_LEATHERWORKING, SKILL_TAILORING};
+constexpr uint16 GATHERING[] = {SKILL_HERBALISM, SKILL_MINING, SKILL_SKINNING};
+
+// The reagents to buy: for each crafting profession, the bot's first skill recipe it lacks reagents for, and of each
+// reagent what CRAFTS crafts need beyond what it carries (item id, count, the recipe)
+struct Want
+{
+    uint32 item;
+    uint32 count;
+    uint32 spell;
+};
+
+std::vector<Want> ShoppingList(Player* bot)
+{
+    std::vector<SpellInfo const*> recipes = EarnedProfessions::SkillRecipes(bot);
+    std::sort(recipes.begin(), recipes.end(), [](SpellInfo const* a, SpellInfo const* b) { return a->Id < b->Id; });
+
+    std::vector<Want> wants;
+    for (uint16 skill : CRAFTING)
+    {
+        for (SpellInfo const* spellInfo : recipes)
+        {
+            SkillLineAbilityMapBounds bounds = sSpellMgr->GetSkillLineAbilityMapBounds(spellInfo->Id);
+            bool const ofSkill = std::any_of(bounds.first, bounds.second, [skill](auto const& row) { return row.second->SkillLine == skill; });
+            if (!ofSkill || EarnedProfessions::HasReagents(bot, spellInfo))
+                continue;
+
+            for (uint8 i = 0; i < MAX_SPELL_REAGENTS; ++i)
+            {
+                if (spellInfo->Reagent[i] <= 0 || !spellInfo->ReagentCount[i])
+                    continue;
+                uint32 const need = spellInfo->ReagentCount[i] * CRAFTS;
+                uint32 const held = bot->GetItemCount(spellInfo->Reagent[i]);
+                if (held < need)
+                    wants.push_back({uint32(spellInfo->Reagent[i]), need - held, spellInfo->Id});
+            }
+            break;  // one recipe a profession
+        }
+    }
+    return wants;
+}
+
+// A gatherer's goods: trade goods patch 2 would list (item usage "AH"), counted by stack
+uint32 Goods(PlayerbotAI* botAI)
+{
+    Player* bot = botAI->GetBot();
+    if (std::none_of(std::begin(GATHERING), std::end(GATHERING), [bot](uint16 skill) { return bot->HasSkill(skill); }))
+        return 0;
+
+    uint32 goods = 0;
+    auto count = [&](Item* item)
+    {
+        ItemTemplate const* proto = item ? item->GetTemplate() : nullptr;
+        if (proto && proto->Class == ITEM_CLASS_TRADE_GOODS && !item->IsSoulBound() &&
+            botAI->GetAiObjectContext()->GetValue<ItemUsage>("item usage", proto->ItemId)->Get() == ITEM_USAGE_AH)
+            ++goods;
+    };
+    for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
+        count(bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot));
+    for (uint8 bagSlot = INVENTORY_SLOT_BAG_START; bagSlot < INVENTORY_SLOT_BAG_END; ++bagSlot)
+        if (Bag* bag = bot->GetBagByPos(bagSlot))
+            for (uint32 slot = 0; slot < bag->GetBagSize(); ++slot)
+                count(bag->GetItemByPos(slot));
+    return goods;
+}
+
+bool HasCrafting(Player* bot)
+{
+    return std::any_of(std::begin(CRAFTING), std::end(CRAFTING), [bot](uint16 skill) { return bot->HasSkill(skill); });
+}
+
+void End(PlayerbotAI* botAI, char const* why)
+{
+    botAI->GetAiObjectContext()->GetValue<time_t>("last said", BotTrade::SESSION_END)->Set(0);
+    LOG_INFO("playerbots", "[trade] {} ends its session: {}", botAI->GetBot()->GetName(), why);
 }
 
 bool Piece(Item* item)
@@ -151,6 +265,179 @@ uint32 Pieces(Player* bot)
     return pieces;
 }
 }  // namespace BotAuction
+
+namespace BotTrade
+{
+bool Enabled(PlayerbotAI* botAI)
+{
+    return sPlayerbotAIConfig.RandomBotTradeSession && sRandomPlayerbotMgr.IsRandomBot(botAI->GetBot()) &&
+           !botAI->GetMaster();
+}
+
+bool Active(PlayerbotAI* botAI)
+{
+    return Enabled(botAI) && botAI->GetAiObjectContext()->GetValue<time_t>("last said", SESSION_END)->Get() != 0;
+}
+
+bool Due(PlayerbotAI* botAI)
+{
+    if (!Enabled(botAI) || Active(botAI) || botAI->GetBot()->GetGroup() || botAI->GetBot()->IsInCombat())
+        return false;
+
+    auto next = botAI->GetAiObjectContext()->GetValue<time_t>("last said", NEXT_SESSION);
+    time_t const now = time(nullptr);
+    if (!next->Get())
+    {
+        next->Set(now + urand(0, COOLDOWN));
+        return false;
+    }
+    return next->Get() <= now;
+}
+
+bool Start(PlayerbotAI* botAI)
+{
+    Player* bot = botAI->GetBot();
+    AiObjectContext* context = botAI->GetAiObjectContext();
+    time_t const now = time(nullptr);
+
+    bool const crafter = HasCrafting(bot);
+    std::vector<Want> const wants = crafter ? ShoppingList(bot) : std::vector<Want>();
+    bool const craftable = crafter && EarnedProfessions::CanCraftNow(botAI);
+    uint32 const goods = Goods(botAI);
+
+    float dist = 0.0f;
+    Spawn const* town = (wants.empty() && !craftable && goods < BotAuction::MIN_PIECES)
+                            ? nullptr
+                            : Nearest(bot, AuctioneerSpawns(), dist);
+    bool inn = false;
+    if (!town && craftable)
+    {
+        town = Nearest(bot, InnkeeperSpawns(), dist);  // crafting only
+        inn = true;
+    }
+
+    // nothing to do, or nowhere to do it: the next look is a cooldown away
+    context->GetValue<time_t>("last said", NEXT_SESSION)->Set(now + COOLDOWN);
+    if (!town)
+        return false;
+
+    context->GetValue<time_t>("last said", SESSION_END)->Set(now + SESSION);
+    // an inn town has no auctioneer to visit: the visit counts as made
+    context->GetValue<time_t>("last said", SHOPPED)->Set(inn ? now : 0);
+    botAI->rpgInfo.ChangeToGoCamp(WorldPosition(town->mapId, town->x, town->y, town->z));
+    LOG_INFO("playerbots",
+             "[trade] {} starts a session at the {} of {} ({:.0f} yd): {} reagents to buy, {}, {} goods to list",
+             bot->GetName(), inn ? "inn" : "auction house", town->entry, dist, wants.size(), craftable ? "a craft ready" : "no craft ready", goods);
+    return true;
+}
+
+bool Stay(PlayerbotAI* botAI)
+{
+    if (!Active(botAI))
+        return false;
+
+    Player* bot = botAI->GetBot();
+    AiObjectContext* context = botAI->GetAiObjectContext();
+    time_t const now = time(nullptr);
+    if (now >= context->GetValue<time_t>("last said", SESSION_END)->Get())
+    {
+        End(botAI, "its 15 minutes are up");
+        return false;
+    }
+    if (bot->GetGroup() || bot->IsInCombat())
+    {
+        End(botAI, bot->GetGroup() ? "it joined a group" : "it is in a fight");
+        return false;
+    }
+
+    // the auctioneer first, once a session
+    if (!context->GetValue<time_t>("last said", SHOPPED)->Get())
+    {
+        float dist = 0.0f;
+        Spawn const* spawn = Nearest(bot, AuctioneerSpawns(), dist);
+        Creature* auctioneer = spawn ? bot->FindNearestCreature(spawn->entry, 60.0f) : nullptr;
+        if (!auctioneer)
+        {
+            End(botAI, "it didn't reach an auctioneer");
+            return false;
+        }
+        botAI->rpgInfo.ChangeToWanderNpc();
+        std::get<NewRpgInfo::WanderNpc>(botAI->rpgInfo.data).npcOrGo = auctioneer->GetGUID();
+        return true;
+    }
+
+    if (!bot->HasPlayerFlag(PLAYER_FLAGS_RESTING))
+    {
+        End(botAI, "it isn't in town");
+        return false;
+    }
+
+    // what keeps it in town: a craft it can make, or auction mail to take (the reagents it won)
+    if (!EarnedProfessions::CanCraftNow(botAI) && !BotAuction::HasMail(bot))
+    {
+        End(botAI, "it has nothing left to do");
+        return false;
+    }
+
+    botAI->rpgInfo.ChangeToRest();
+    return true;
+}
+}  // namespace BotTrade
+
+bool AhBuyReagentsAction::Execute(Event /*event*/)
+{
+    auto const* visit = std::get_if<NewRpgInfo::WanderNpc>(&botAI->rpgInfo.data);
+    if (!visit)
+        return false;
+
+    Creature* auctioneer = bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_AUCTIONEER);
+    AuctionHouseObject* house = auctioneer ? sAuctionMgr->GetAuctionsMap(auctioneer->GetFaction()) : nullptr;
+    if (!house)
+        return false;
+
+    context->GetValue<time_t>("last said", BotTrade::SHOPPED)->Set(time(nullptr));
+
+    // its own money (upstream's "free money for" tradeskill), less each bid queued this visit: the money moves only when
+    // the world thread runs the bid. No price ceiling (Logan, 10-22 12:42Z).
+    uint32 budget = AI_VALUE2(uint32, "free money for", uint32(NeedMoneyFor::tradeskill));
+    uint32 const account = bot->GetSession()->GetAccountId();
+    uint32 bids = 0, spent = 0;
+    for (Want const& want : ShoppingList(bot))
+    {
+        // the core refuses a bid on one's own auction or one from the same account (HandleAuctionPlaceBid)
+        std::vector<AuctionEntry const*> offers;
+        for (auto const& [id, auction] : house->GetAuctions())
+            if (auction && auction->item_template == want.item && auction->buyout && auction->itemCount &&
+                auction->owner != bot->GetGUID() && sCharacterCache->GetCharacterAccountIdByGuid(auction->owner) != account)
+                offers.push_back(auction);
+
+        std::sort(offers.begin(), offers.end(), [](AuctionEntry const* a, AuctionEntry const* b)
+                  { return uint64(a->buyout) * b->itemCount < uint64(b->buyout) * a->itemCount; });
+
+        uint32 got = 0;
+        for (AuctionEntry const* auction : offers)
+        {
+            if (got >= want.count || auction->buyout > budget)
+                break;
+
+            WorldPacket* packet = new WorldPacket(CMSG_AUCTION_PLACE_BID, 8 + 4 + 4);
+            *packet << auctioneer->GetGUID() << auction->Id << auction->buyout;
+            bot->GetSession()->QueuePacket(packet);
+            budget -= auction->buyout;
+            spent += auction->buyout;
+            got += auction->itemCount;
+            ++bids;
+            LOG_INFO("playerbots", "[trade] {} bids out {} x {} for {} copper ({} each) at {}, for spell {}",
+                     bot->GetName(), auction->itemCount, want.item, auction->buyout, auction->buyout / auction->itemCount,
+                     auctioneer->GetName(), want.spell);
+        }
+    }
+
+    if (!bids)
+        LOG_INFO("playerbots", "[trade] {} finds no reagents it can pay for at {}, with {} copper free for its trades",
+                 bot->GetName(), auctioneer->GetName(), budget);
+    return bids > 0;
+}
 
 bool NewRpgGoAuctioneerAction::Execute(Event /*event*/)
 {

@@ -136,6 +136,16 @@ void NewRpgStrategy::InitTriggers(std::vector<TriggerNode*>& triggers)
             }
         )
     );
+    // agent-wow local patch (#87 step 2): in a trade session, the bot bids out reagents at the auctioneer, after patch 2
+    // lists and before patch 26's gear buy
+    triggers.push_back(
+        new TriggerNode(
+            "at auctioneer for reagents",
+            {
+                NextAction("ah buy reagents", 3.97f)
+            }
+        )
+    );
     triggers.push_back(
         new TriggerNode(
             "mailbox run due",

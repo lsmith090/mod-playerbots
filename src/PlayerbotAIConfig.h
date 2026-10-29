@@ -110,6 +110,7 @@ public:
     bool AllowAccountBots, AllowGuildBots, AllowTrustedAccountBots;
     bool RandomBotGuildNearby, RandomBotInvitePlayer, InviteChat;
     uint32 RandomBotRelocate;  // agent-wow local patch (#3159): hours between a stranded bot's unseen moves, 0 off
+    bool RandomBotTradeSession;  // agent-wow local patch (#87 step 2): the artisans' trade session
     uint32 GlobalCoolDown, ReactDelay, MaxWaitForMove, DisableMoveSplinePath, MaxMovementSearchTime, ExpireActionTime,
         DispelAuraDuration, PassiveDelay, RepeatDelay, ErrorDelay, RpgDelay, SitDelay, ReturnDelay, LootDelay;
     bool DynamicReactDelay;

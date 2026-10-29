@@ -84,6 +84,18 @@ private:
     uint32 lastVisitStart{0};
 };
 
+// agent-wow local patch (#87 step 2): the bot in a trade session stands at the auctioneer its session chose, once a visit
+class AtAuctioneerForReagentsTrigger : public Trigger
+{
+public:
+    AtAuctioneerForReagentsTrigger(PlayerbotAI* botAI) : Trigger(botAI, "at auctioneer for reagents") {}
+    bool IsActive() override;
+
+private:
+    ObjectGuid lastAuctioneer;
+    uint32 lastVisitStart{0};
+};
+
 // agent-wow local patch (RandomBotAuctionBuy): the bot has auction mail and a mailbox in sight
 class MailboxRunDueTrigger : public Trigger
 {

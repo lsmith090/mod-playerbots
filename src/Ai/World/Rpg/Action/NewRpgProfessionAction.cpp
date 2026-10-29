@@ -121,6 +121,52 @@ bool CraftEnabled(PlayerbotAI* botAI)
            sRandomPlayerbotMgr.IsRandomBot(botAI->GetBot()) && !botAI->GetMaster();
 }
 
+std::vector<SpellInfo const*> SkillRecipes(Player* bot)
+{
+    std::vector<SpellInfo const*> recipes;
+    for (auto const& [spellId, playerSpell] : bot->GetSpellMap())
+    {
+        if (playerSpell->State == PLAYERSPELL_REMOVED || !playerSpell->Active)
+            continue;
+
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId);
+        if (!spellInfo || !spellInfo->HasEffect(SPELL_EFFECT_CREATE_ITEM))
+            continue;
+
+        // a recipe of a trade skill below its max that still gives a point (not grey)
+        bool raisesSkill = false;
+        SkillLineAbilityMapBounds bounds = sSpellMgr->GetSkillLineAbilityMapBounds(spellId);
+        for (auto itr = bounds.first; itr != bounds.second && !raisesSkill; ++itr)
+        {
+            uint16 const skillId = itr->second->SkillLine;
+            bool const tradeSkill =
+                std::find(std::begin(TRADE_SKILLS), std::end(TRADE_SKILLS), skillId) != std::end(TRADE_SKILLS);
+            raisesSkill = tradeSkill && bot->GetPureSkillValue(skillId) < bot->GetPureMaxSkillValue(skillId);
+        }
+        if (raisesSkill && ItemUsageValue::SpellGivesSkillUp(spellId, bot))
+            recipes.push_back(spellInfo);
+    }
+    return recipes;
+}
+
+bool HasReagents(Player* bot, SpellInfo const* spellInfo)
+{
+    for (uint8 i = 0; i < MAX_SPELL_REAGENTS; ++i)
+        if (spellInfo->Reagent[i] > 0 && spellInfo->ReagentCount[i] &&
+            !bot->HasItemCount(spellInfo->Reagent[i], spellInfo->ReagentCount[i]))
+            return false;
+    return true;
+}
+
+bool CanCraftNow(PlayerbotAI* botAI)
+{
+    Player* bot = botAI->GetBot();
+    for (SpellInfo const* spellInfo : SkillRecipes(bot))
+        if (HasReagents(bot, spellInfo) && botAI->CanCastSpell(spellInfo->Id, bot, true))
+            return true;
+    return false;
+}
+
 bool AtCap(Player* bot)
 {
     for (uint16 skillId : TRADE_SKILLS)
@@ -212,37 +258,12 @@ bool RpgProfessionTrainAction::Execute(Event /*event*/)
 bool CraftForSkillAction::Execute(Event /*event*/)
 {
     std::vector<uint32> crafts;
-    for (auto const& [spellId, playerSpell] : bot->GetSpellMap())
+    for (SpellInfo const* spellInfo : EarnedProfessions::SkillRecipes(bot))
     {
-        if (playerSpell->State == PLAYERSPELL_REMOVED || !playerSpell->Active)
-            continue;
-
-        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId);
-        if (!spellInfo || !spellInfo->HasEffect(SPELL_EFFECT_CREATE_ITEM))
-            continue;
-
-        // a recipe of a trade skill below its max that still gives a point (not grey)
-        bool raisesSkill = false;
-        SkillLineAbilityMapBounds bounds = sSpellMgr->GetSkillLineAbilityMapBounds(spellId);
-        for (auto itr = bounds.first; itr != bounds.second && !raisesSkill; ++itr)
-        {
-            uint16 const skillId = itr->second->SkillLine;
-            bool const tradeSkill =
-                std::find(std::begin(TRADE_SKILLS), std::end(TRADE_SKILLS), skillId) != std::end(TRADE_SKILLS);
-            raisesSkill = tradeSkill && bot->GetPureSkillValue(skillId) < bot->GetPureMaxSkillValue(skillId);
-        }
-        if (!raisesSkill || !ItemUsageValue::SpellGivesSkillUp(spellId, bot))
-            continue;
-
-        // CanCastSpell ignores reagents (TRIGGERED_IGNORE_POWER_AND_REAGENT_COST), so count them here
-        bool hasReagents = true;
-        for (uint8 i = 0; i < MAX_SPELL_REAGENTS && hasReagents; ++i)
-            if (spellInfo->Reagent[i] > 0 && spellInfo->ReagentCount[i])
-                hasReagents = bot->HasItemCount(spellInfo->Reagent[i], spellInfo->ReagentCount[i]);
-
+        // CanCastSpell ignores reagents (TRIGGERED_IGNORE_POWER_AND_REAGENT_COST), so they're counted first; then
         // tools, the spell focus, the cooldown
-        if (hasReagents && botAI->CanCastSpell(spellId, bot, true))
-            crafts.push_back(spellId);
+        if (EarnedProfessions::HasReagents(bot, spellInfo) && botAI->CanCastSpell(spellInfo->Id, bot, true))
+            crafts.push_back(spellInfo->Id);
     }
 
     auto nextSearch = context->GetValue<time_t>("last said", EarnedProfessions::NEXT_CRAFT_SEARCH);
@@ -253,7 +274,11 @@ bool CraftForSkillAction::Execute(Event /*event*/)
     }
 
     uint32 const spellId = crafts[urand(0, crafts.size() - 1)];
-    LOG_DEBUG("playerbots", "[earned] {} crafts {} for skill", bot->GetName(), spellId);
+    // agent-wow (#87 step 2): every craft is logged at info while the trade session's key is on, for the day-after read
+    if (sPlayerbotAIConfig.RandomBotTradeSession)
+        LOG_INFO("playerbots", "[trade] {} crafts {} for skill", bot->GetName(), spellId);
+    else
+        LOG_DEBUG("playerbots", "[earned] {} crafts {} for skill", bot->GetName(), spellId);
     if (botAI->CastSpell(spellId, bot))
         return true;
 

@@ -95,8 +95,12 @@ bool CraftForSkillTrigger::IsActive()
             return false;
     }
 
+    // agent-wow (#87 step 2): with the trade session's key on, a bot crafts at any rest, wherever it is (a recipe that
+    // needs a focus still needs it: CraftForSkillAction's CanCastSpell)
+    bool const resting = bot->HasPlayerFlag(PLAYER_FLAGS_RESTING) ||
+                         (sPlayerbotAIConfig.RandomBotTradeSession && botAI->rpgInfo.GetStatus() == RPG_REST);
     time_t const now = time(nullptr);
-    return bot->HasPlayerFlag(PLAYER_FLAGS_RESTING) && !bot->IsInCombat() && !bot->isMoving() &&
+    return resting && !bot->IsInCombat() && !bot->isMoving() &&
            !bot->IsNonMeleeSpellCast(false) && EarnedProfessions::CraftEnabled(botAI) &&
            AI_VALUE2(time_t, "last said", EarnedProfessions::NEXT_CRAFT_SEARCH) <= now &&
            AI_VALUE2(time_t, "last said", EarnedProfessions::CRAFT_ORDER_HOLD) <= now;
@@ -159,6 +163,25 @@ bool AtAuctioneerToBuyTrigger::IsActive()
         return false;
 
     if (!BotAuction::Enabled(botAI) || !bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_AUCTIONEER))
+        return false;
+
+    lastAuctioneer = visit->npcOrGo;
+    lastVisitStart = botAI->rpgInfo.startT;
+    return true;
+}
+
+bool AtAuctioneerForReagentsTrigger::IsActive()
+{
+    auto* visit = std::get_if<NewRpgInfo::WanderNpc>(&botAI->rpgInfo.data);
+    if (!visit || !visit->npcOrGo)
+        return false;
+
+    // one try per visit, bought or not
+    if (visit->npcOrGo == lastAuctioneer && botAI->rpgInfo.startT == lastVisitStart)
+        return false;
+
+    if (!BotTrade::Active(botAI) || AI_VALUE2(time_t, "last said", BotTrade::SHOPPED) ||
+        !bot->GetNPCIfCanInteractWith(visit->npcOrGo, UNIT_NPC_FLAG_AUCTIONEER))
         return false;
 
     lastAuctioneer = visit->npcOrGo;

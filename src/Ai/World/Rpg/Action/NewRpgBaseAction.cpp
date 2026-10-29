@@ -28,6 +28,7 @@
 #include "GossipDef.h"
 #include "GridTerrainData.h"
 #include "IVMapMgr.h"
+#include "NewRpgAuctionAction.h"
 #include "NewRpgInfo.h"
 #include "NewRpgStrategy.h"
 #include "Object.h"
@@ -1646,6 +1647,10 @@ bool NewRpgBaseAction::RandomChangeStatus(std::vector<NewRpgStatus> candidateSta
         }
     }
 
+    // agent-wow local patch (#87 step 2): a bot in a trade session stays in town while it has work there
+    if (BotTrade::Stay(botAI))
+        return true;
+
     std::vector<NewRpgStatus> availableStatus;
     uint32 probSum = 0;
     for (NewRpgStatus status : candidateStatus)
@@ -1659,6 +1664,10 @@ bool NewRpgBaseAction::RandomChangeStatus(std::vector<NewRpgStatus> candidateSta
             probSum += sPlayerbotAIConfig.RpgStatusProbWeight[status];
         }
     }
+
+    // agent-wow local patch (#87 step 2): a due trade session is drawn beside the statuses at WanderNpc's weight
+    if (BotTrade::Due(botAI) && urand(1, probSum + BotTrade::WEIGHT) > probSum && BotTrade::Start(botAI))
+        return true;
     // Safety check. Default to "rest" if all RPG weights = 0
     if (availableStatus.empty() || probSum == 0)
     {

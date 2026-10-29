@@ -257,6 +257,7 @@ public:
         creators["at errand vendor"] = &TriggerContext::at_errand_vendor;  // agent-wow local patch
         creators["auction run due"] = &TriggerContext::auction_run_due;  // agent-wow local patch
         creators["at auctioneer to buy"] = &TriggerContext::at_auctioneer_to_buy;  // agent-wow local patch
+        creators["at auctioneer for reagents"] = &TriggerContext::at_auctioneer_for_reagents;  // agent-wow local patch
         creators["mailbox run due"] = &TriggerContext::mailbox_run_due;  // agent-wow local patch
         creators["at mailbox"] = &TriggerContext::at_mailbox;  // agent-wow local patch
         creators["follower quest giver"] = &TriggerContext::follower_quest_giver;  // agent-wow local patch
@@ -485,6 +486,7 @@ private:
     static Trigger* at_errand_vendor(PlayerbotAI* botAI) { return new AtErrandVendorTrigger(botAI); }
     static Trigger* auction_run_due(PlayerbotAI* botAI) { return new AuctionRunDueTrigger(botAI); }
     static Trigger* at_auctioneer_to_buy(PlayerbotAI* botAI) { return new AtAuctioneerToBuyTrigger(botAI); }
+    static Trigger* at_auctioneer_for_reagents(PlayerbotAI* botAI) { return new AtAuctioneerForReagentsTrigger(botAI); }
     static Trigger* mailbox_run_due(PlayerbotAI* botAI) { return new MailboxRunDueTrigger(botAI); }
     static Trigger* at_mailbox(PlayerbotAI* botAI) { return new AtMailboxTrigger(botAI); }
     static Trigger* follower_quest_giver(PlayerbotAI* botAI) { return new FollowerQuestGiverTrigger(botAI); }

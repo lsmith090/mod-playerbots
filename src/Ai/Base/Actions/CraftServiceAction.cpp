@@ -38,6 +38,10 @@ time_t factionPosted[3] = {0, 0, 0};    // by TeamId: one LFW per faction per Ra
 uint32 const crafts[] = {SKILL_ALCHEMY,        SKILL_BLACKSMITHING, SKILL_ENCHANTING,    SKILL_ENGINEERING,
                          SKILL_LEATHERWORKING, SKILL_TAILORING};
 
+// agent-wow (#87 step 2): the skill from which a bot advertises a craft. By 50 a tailor makes Linen Bags (its trainer's
+// rank 45) and a smith its stones (25), the first things a customer orders; 600 adverts a day came from bots at 1
+uint32 const ADVERT_SKILL = 50;
+
 bool IsCraft(uint32 skill) { return std::find(std::begin(crafts), std::end(crafts), skill) != std::end(crafts); }
 
 std::string SkillName(uint32 skill)
@@ -321,9 +325,11 @@ bool SuggestCraftAction::isUseful()
 
 bool SuggestCraftAction::Execute(Event /*event*/)
 {
+    // agent-wow (#87 step 2): with the trade session's key on, a bot advertises a craft only from ADVERT_SKILL on; at
+    // skill 1 it has nothing a customer would order (an answer to someone who asks, below, isn't gated)
     std::vector<uint32> skills;
     for (uint32 skill : crafts)
-        if (bot->HasSkill(skill))
+        if (bot->HasSkill(skill) && (!sPlayerbotAIConfig.RandomBotTradeSession || bot->GetSkillValue(skill) >= ADVERT_SKILL))
             skills.push_back(skill);
 
     std::string const advert = skills.empty() ? "" : CraftService::Advert(bot, skills[urand(0, skills.size() - 1)]);

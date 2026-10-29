@@ -10,7 +10,10 @@
 #include "Action.h"
 #include "UseItemAction.h"
 
+#include <vector>
+
 class Item;
+class SpellInfo;
 class Player;
 class PlayerbotAI;
 
@@ -33,6 +36,13 @@ bool CraftEnabled(PlayerbotAI* botAI);
 inline constexpr char const* NEXT_CRAFT_SEARCH = "earned next craft search";
 // "last said" holds until when a customer's mats sit in the bot's bags (#87 piece 8 sets it): no crafting till then
 inline constexpr char const* CRAFT_ORDER_HOLD = "craft order hold";
+
+// agent-wow (#87 step 2): the bot's known recipes of a trade skill below its max that still give a point (not grey)
+std::vector<SpellInfo const*> SkillRecipes(Player* bot);
+// the recipe's reagents are all in the bags
+bool HasReagents(Player* bot, SpellInfo const* spellInfo);
+// a skill recipe it can craft now: reagents, tools, the focus, the cooldown
+bool CanCraftNow(PlayerbotAI* botAI);
 }  // namespace EarnedProfessions
 
 // A random bot whose trade skill sits at its cap walks to the nearest friendly trainer on its map that teaches the
