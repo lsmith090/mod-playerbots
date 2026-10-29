@@ -61,6 +61,8 @@ std::mutex pathLock;  // bots of different maps update on different threads
 std::map<ObjectGuid, time_t> pathLogged;  // ponytail: never pruned; one time_t per bot ever seen
 // agent-wow (#2954): each bot's path-danger holds on the way to its present goal (Playerbots.RandomBotPathDangerHoldTries)
 std::map<ObjectGuid, std::pair<WorldPosition, uint32>> pathHolds;  // ponytail: never pruned, as pathLogged
+// agent-wow (#2954): when the ladder walk last picked a goal for each bot (Playerbots.RandomBotLadderWalk)
+std::map<ObjectGuid, uint32> ladderPicked;  // ponytail: never pruned, as pathLogged
 
 // agent-wow: the first mob that would aggro the bot on a walk through these points (Playerbots.RandomBotPathDanger).
 // The walk is sampled every 8 yd for its first 120 yd: farther than that the bot sees nothing. A bot that already
@@ -1367,6 +1369,57 @@ WorldPosition NewRpgBaseAction::SelectRandomCampPos(Player* bot)
     return dest;
 }
 
+// agent-wow local patch (Logan, 2026-10-29, #2954): the ladder walk, in place of the teleport for level that patch 27
+// turned off. A random bot that has outgrown its zone walks to the nearest hub on its map whose zone's band holds its
+// level: go camp's own pick (the hubs the teleport chose from), without go camp's two limits, its own zone and 2,500 yd.
+// Off unless Playerbots.RandomBotLadderWalk, and only while the path-danger hold is on (RandomBotPathDangerHold above
+// 0): nothing else holds a long walk back from a mob far above the bot. A goal is picked at most every 20 minutes, so a
+// goal given up (stuck, or held too often) isn't taken again at the next idle. A grouped bot keeps to its group.
+WorldPosition NewRpgBaseAction::SelectLadderHubPos()
+{
+    if (!sConfigMgr->GetOption<bool>("Playerbots.RandomBotLadderWalk", false) ||
+        sConfigMgr->GetOption<int32>("Playerbots.RandomBotPathDangerHold", 0) <= 0 || !sRandomPlayerbotMgr.IsRandomBot(bot) ||
+        bot->GetGroup())
+        return WorldPosition();
+
+    {
+        std::lock_guard<std::mutex> guard(pathLock);
+        auto const it = ladderPicked.find(bot->GetGUID());
+        if (it != ladderPicked.end() && GetMSTimeDiffToNow(it->second) < 20 * MINUTE * IN_MILLISECONDS)
+            return WorldPosition();
+    }
+
+    if (!sTravelMgr.OutgrownZone(bot))
+        return WorldPosition();
+
+    WorldPosition dest{};
+    float nearest = FLT_MAX;
+    for (WorldLocation const& loc : sTravelMgr.GetTravelHubs(bot))
+    {
+        if (loc.GetMapId() != bot->GetMapId())
+            continue;
+
+        // an outgrown zone's own hubs aren't listed at this level: every hub here is in another zone
+        float const dis = bot->GetExactDist(loc);
+        if (dis < 50.0f || dis >= nearest)
+            continue;
+
+        nearest = dis;
+        dest = loc;
+    }
+
+    if (dest != WorldPosition())
+    {
+        {
+            std::lock_guard<std::mutex> guard(pathLock);
+            ladderPicked[bot->GetGUID()] = getMSTime();
+        }
+        LOG_INFO("playerbots", "[ladder] {} (L{}) has outgrown zone {} and walks {:.0f} yd to the hub at {:.0f}, {:.0f}",
+                 bot->GetName(), bot->GetLevel(), bot->GetZoneId(), nearest, dest.GetPositionX(), dest.GetPositionY());
+    }
+    return dest;
+}
+
 bool NewRpgBaseAction::SelectRandomFlightTaxiNode(uint32& flightMasterEntry, WorldPosition& flightMasterPos, std::vector<uint32>& path)
 {
     TravelMgr::FlightMasterInfo const* info = sTravelMgr.GetNearestFlightMasterInfo(bot);
@@ -1387,6 +1440,16 @@ bool NewRpgBaseAction::SelectRandomFlightTaxiNode(uint32& flightMasterEntry, Wor
 
 bool NewRpgBaseAction::RandomChangeStatus(std::vector<NewRpgStatus> candidateStatus)
 {
+    // agent-wow local patch (#2954): an outgrown bot walks the ladder before it draws a status (at a level-up too: the
+    // bot is idle once its fight or its goal ends)
+    WorldPosition ladder = SelectLadderHubPos();
+    if (ladder != WorldPosition())
+    {
+        botAI->rpgInfo.ChangeToGoCamp(ladder);
+        SpeechForms::Going(botAI, ladder);
+        return true;
+    }
+
     std::vector<NewRpgStatus> availableStatus;
     uint32 probSum = 0;
     for (NewRpgStatus status : candidateStatus)

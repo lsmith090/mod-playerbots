@@ -4502,6 +4502,15 @@ const std::vector<WorldLocation> TravelMgr::GetTravelHubs(Player* bot)
     return locs;
 }
 
+// agent-wow local patch (Logan, 2026-10-29, #2954): a bot whose level is past its zone's band has outgrown the zone, so
+// the ladder walk sends it on. A zone with no band (a capital, an instance) is never outgrown: the ladder starts only
+// from a zone it knows.
+bool TravelMgr::OutgrownZone(Player* bot, uint32 zoneId) const
+{
+    auto const it = zone2LevelBracket.find(zoneId ? zoneId : bot->GetZoneId());
+    return it != zone2LevelBracket.end() && bot->GetLevel() > it->second.high;
+}
+
 std::vector<WorldLocation> TravelMgr::GetCityLocations(Player* bot)
 {
     uint32 level = bot->GetLevel();
