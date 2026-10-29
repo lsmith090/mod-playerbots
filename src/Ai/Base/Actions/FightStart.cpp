@@ -12,6 +12,7 @@
 #include <string>
 
 #include "Config.h"
+#include "NewRpgAuctionAction.h"
 #include "NewRpgInfo.h"
 #include "Playerbots.h"
 #include "RandomPlayerbotMgr.h"
@@ -156,6 +157,9 @@ Fight Start(PlayerbotAI* botAI, Player* bot, time_t now)
         fight.head += ": nothing on it";
 
     fight.head += fmt::format("; rpg {}", RpgName(botAI->rpgInfo.GetStatus()));
+    // agent-wow (#87 step 2): a fight on a trade session's walk or stay says so, for the deaths it costs
+    if (BotTrade::Active(botAI))
+        fight.head += "; trade session";
     return fight;
 }
 }  // namespace
