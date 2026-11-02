@@ -312,10 +312,16 @@ uint32 Pieces(Player* bot)
 
 namespace BotTrade
 {
+bool ArtisansOn()
+{
+    return sConfigMgr->GetOption<bool>("Playerbots.RandomBotArtisans", false);
+}
+
 bool Enabled(PlayerbotAI* botAI)
 {
-    return sPlayerbotAIConfig.RandomBotTradeSession && sRandomPlayerbotMgr.IsRandomBot(botAI->GetBot()) &&
-           !botAI->GetMaster();
+    // read here, not in PlayerbotAIConfig.h, so `.reload config` pauses the sessions and the hot headers stay alone
+    return sConfigMgr->GetOption<bool>("Playerbots.RandomBotTradeSession", false) &&
+           sRandomPlayerbotMgr.IsRandomBot(botAI->GetBot()) && !botAI->GetMaster();
 }
 
 bool Active(PlayerbotAI* botAI)

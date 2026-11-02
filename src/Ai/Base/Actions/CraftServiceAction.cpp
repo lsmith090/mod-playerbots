@@ -17,6 +17,7 @@
 #include "Config.h"
 #include "DBCStores.h"
 #include "Event.h"
+#include "NewRpgAuctionAction.h"
 #include "PlayerbotTextMgr.h"
 #include "Playerbots.h"
 #include "SpellMgr.h"
@@ -325,11 +326,12 @@ bool SuggestCraftAction::isUseful()
 
 bool SuggestCraftAction::Execute(Event /*event*/)
 {
-    // agent-wow (#87 step 2): with the trade session's key on, a bot advertises a craft only from ADVERT_SKILL on; at
+    // agent-wow (#87 step 2): with RandomBotArtisans on, a bot advertises a craft only from ADVERT_SKILL on; at
     // skill 1 it has nothing a customer would order (an answer to someone who asks, below, isn't gated)
+    bool const gated = BotTrade::ArtisansOn();
     std::vector<uint32> skills;
     for (uint32 skill : crafts)
-        if (bot->HasSkill(skill) && (!sPlayerbotAIConfig.RandomBotTradeSession || bot->GetSkillValue(skill) >= ADVERT_SKILL))
+        if (bot->HasSkill(skill) && (!gated || bot->GetSkillValue(skill) >= ADVERT_SKILL))
             skills.push_back(skill);
 
     std::string const advert = skills.empty() ? "" : CraftService::Advert(bot, skills[urand(0, skills.size() - 1)]);

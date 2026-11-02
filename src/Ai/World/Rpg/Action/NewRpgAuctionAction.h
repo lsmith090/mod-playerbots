@@ -42,7 +42,7 @@ uint32 Pieces(Player* bot);
 // to craft, goods to list) goes to the nearest town with an auction house on its map (patch 26's search, 3,000 yd),
 // else the nearest inn town for crafting only, and stays there up to 15 minutes: patch 2 lists, it bids out reagents,
 // the earned trainer trains, it crafts, patch 26 takes its auction mail. Drawn at weight 20 (WanderNpc's) among the
-// statuses, at most every 2 hours. Off unless Playerbots.RandomBotTradeSession (read once, PlayerbotAIConfig). A session
+// statuses, at most every 2 hours. Off unless Playerbots.RandomBotTradeSession, read per use. A session
 // starts only from RandomBotTradeSessionMinLevel, within RandomBotTradeSessionMaxWalk yd, and with
 // RandomBotTradeSessionMustPay a trip only to buy needs money for one reagent on sale (#87, the 11-02 read).
 namespace BotTrade
@@ -55,6 +55,9 @@ inline constexpr char const* SHOPPED = "trade session shopped";
 // Playerbots.RpgStatusProbWeight.WanderNpc's default
 inline constexpr uint32 WEIGHT = 20;
 
+// Playerbots.RandomBotArtisans, apart from the sessions so a pause keeps them: crafting at any rest, adverts only from
+// skill 50, and the `[trade] crafts` line
+bool ArtisansOn();
 // the key is on and the bot is a random bot without a master
 bool Enabled(PlayerbotAI* botAI);
 // a session is under way

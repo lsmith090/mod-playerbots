@@ -12,6 +12,7 @@
 #include "Config.h"
 #include "Event.h"
 #include "ItemUsageValue.h"
+#include "NewRpgAuctionAction.h"
 #include "NewRpgInfo.h"
 #include "ObjectMgr.h"
 #include "PlayerbotFactory.h"
@@ -274,8 +275,8 @@ bool CraftForSkillAction::Execute(Event /*event*/)
     }
 
     uint32 const spellId = crafts[urand(0, crafts.size() - 1)];
-    // agent-wow (#87 step 2): every craft is logged at info while the trade session's key is on, for the day-after read
-    if (sPlayerbotAIConfig.RandomBotTradeSession)
+    // agent-wow (#87 step 2): every craft is logged at info while RandomBotArtisans is on, for the day-after read
+    if (BotTrade::ArtisansOn())
         LOG_INFO("playerbots", "[trade] {} crafts {} for skill", bot->GetName(), spellId);
     else
         LOG_DEBUG("playerbots", "[earned] {} crafts {} for skill", bot->GetName(), spellId);

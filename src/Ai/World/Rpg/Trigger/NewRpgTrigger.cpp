@@ -95,10 +95,10 @@ bool CraftForSkillTrigger::IsActive()
             return false;
     }
 
-    // agent-wow (#87 step 2): with the trade session's key on, a bot crafts at any rest, wherever it is (a recipe that
+    // agent-wow (#87 step 2): with RandomBotArtisans on, a bot crafts at any rest, wherever it is (a recipe that
     // needs a focus still needs it: CraftForSkillAction's CanCastSpell)
     bool const resting = bot->HasPlayerFlag(PLAYER_FLAGS_RESTING) ||
-                         (sPlayerbotAIConfig.RandomBotTradeSession && botAI->rpgInfo.GetStatus() == RPG_REST);
+                         (botAI->rpgInfo.GetStatus() == RPG_REST && BotTrade::ArtisansOn());
     time_t const now = time(nullptr);
     return resting && !bot->IsInCombat() && !bot->isMoving() &&
            !bot->IsNonMeleeSpellCast(false) && EarnedProfessions::CraftEnabled(botAI) &&
