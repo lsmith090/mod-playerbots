@@ -85,6 +85,10 @@ bool PoiOnMesh(Player* bot, uint32 questId, uint32 poiId, float x, float y, floa
 {
     if (!sConfigMgr->GetOption<bool>("Playerbots.RandomBotPoiOnMesh", false) || !sRandomPlayerbotMgr.IsRandomBot(bot))
         return true;
+    // Under a building's floor the map has a hole, and this height is the water grid's -500: it says nothing about the
+    // ground. Most such POIs are hand-ins that bots turn in today (788 Cutting Teeth, 567 times), so they stay.
+    if (z <= -500.0f)
+        return true;
     dtNavMeshQuery const* query = bot->GetMap()->GetMapCollisionData().GetMMapData().GetNavMeshQuery();
     if (!query)
         return true;
