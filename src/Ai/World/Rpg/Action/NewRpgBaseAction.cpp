@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <ctime>
 #include <map>
 #include <mutex>
@@ -76,6 +77,49 @@ std::map<ObjectGuid, time_t> relocated;  // ponytail: never pruned, as pathLogge
 // agent-wow: the quest POIs already logged as skipped (Playerbots.RandomBotPoiOnMesh)
 std::set<std::pair<uint32, uint32>> poiSkipped;  // quest, POI id. ponytail: never pruned, bounded by the POI table
 
+// Is there navmesh in PathGenerator's wider search box around this point? With no mesh loaded at all, it can't say: yes.
+bool NavMeshAt(Map* map, float x, float y, float z)
+{
+    dtNavMeshQuery const* query = map->GetMapCollisionData().GetMMapData().GetNavMeshQuery();
+    if (!query)
+        return true;
+    float const point[3] = {y, z, x};
+    float const extents[3] = {3.0f, 50.0f, 3.0f};
+    float nearest[3];
+    dtQueryFilter const filter;
+    dtPolyRef poly = 0;
+    return dtStatusSucceed(query->findNearestPoly(point, extents, &filter, &poly, nearest)) && poly;
+}
+
+float constexpr SPAWN_CELL = 30.0f;
+
+uint64 SpawnCellKey(uint32 mapId, int32 cellX, int32 cellY)
+{
+    return (uint64(mapId) << 48) | (uint64(uint32(cellX) & 0xFFFFFF) << 24) | uint64(uint32(cellY) & 0xFFFFFF);
+}
+
+// every creature and object spawn on the two continents, by 30 yd cell, gathered once
+std::unordered_map<uint64, std::vector<G3D::Vector3>> const& SpawnCells()
+{
+    static std::unordered_map<uint64, std::vector<G3D::Vector3>> const cells = []
+    {
+        std::unordered_map<uint64, std::vector<G3D::Vector3>> result;
+        auto const add = [&result](SpawnData const& data)
+        {
+            if (data.mapid <= 1)
+                result[SpawnCellKey(data.mapid, int32(std::floor(data.posX / SPAWN_CELL)),
+                                    int32(std::floor(data.posY / SPAWN_CELL)))]
+                    .emplace_back(data.posX, data.posY, data.posZ);
+        };
+        for (auto const& [spawnId, data] : sObjectMgr->GetAllCreatureData())
+            add(data);
+        for (auto const& [spawnId, data] : sObjectMgr->GetAllGOData())
+            add(data);
+        return result;
+    }();
+    return cells;
+}
+
 // agent-wow local patch: a quest POI's height is the top surface at its x, y, so a POI over a cave (Twisted Hatred's over
 // Lord Melenas, 97 yd down) can name a hilltop with no navmesh. The path to such a point is a straight line through
 // the hill, and from it no path comes back: 56 bots stood there on 2026-11-02. A random bot skips such a POI
@@ -89,15 +133,7 @@ bool PoiOnMesh(Player* bot, uint32 questId, uint32 poiId, float x, float y, floa
     // ground. Most such POIs are hand-ins that bots turn in today (788 Cutting Teeth, 567 times), so they stay.
     if (z <= -500.0f)
         return true;
-    dtNavMeshQuery const* query = bot->GetMap()->GetMapCollisionData().GetMMapData().GetNavMeshQuery();
-    if (!query)
-        return true;
-    float const point[3] = {y, z, x};
-    float const extents[3] = {3.0f, 50.0f, 3.0f};
-    float nearest[3];
-    dtQueryFilter const filter;
-    dtPolyRef poly = 0;
-    if (dtStatusSucceed(query->findNearestPoly(point, extents, &filter, &poly, nearest)) && poly)
+    if (NavMeshAt(bot->GetMap(), x, y, z))
         return true;
     std::lock_guard<std::mutex> guard(pathLock);
     if (poiSkipped.insert({questId, poiId}).second)
@@ -1231,7 +1267,7 @@ bool NewRpgBaseAction::GetQuestPOIPosAndObjectiveIdx(uint32 questId, std::vector
             if (bot->GetDistance2d(dx, dy) >= 1500.0f)
                 continue;
 
-            float dz = std::max(bot->GetMap()->GetHeight(dx, dy, MAX_HEIGHT), bot->GetMap()->GetWaterLevel(dx, dy));
+            float dz = PoiHeight(bot, dx, dy);
 
             if (dz == INVALID_HEIGHT || dz == VMAP_INVALID_HEIGHT_VALUE)
                 continue;
@@ -1306,7 +1342,7 @@ bool NewRpgBaseAction::GetQuestPOIPosAndObjectiveIdx(uint32 questId, std::vector
         if (bot->GetDistance2d(dx, dy) >= 1500.0f)
             continue;
 
-        float dz = std::max(bot->GetMap()->GetHeight(dx, dy, MAX_HEIGHT), bot->GetMap()->GetWaterLevel(dx, dy));
+        float dz = PoiHeight(bot, dx, dy);
 
         if (dz == INVALID_HEIGHT || dz == VMAP_INVALID_HEIGHT_VALUE)
             continue;
@@ -1327,6 +1363,44 @@ bool NewRpgBaseAction::GetQuestPOIPosAndObjectiveIdx(uint32 questId, std::vector
     }
 
     return true;
+}
+
+// agent-wow local patch: GetHeight looks for buildings and caves only 50 yd below the z it's given, so from MAX_HEIGHT it
+// finds neither, and a POI's height is the top surface or, over a hole under a building's floor, the water grid's -500.
+// Gornek stands at z 41 under a -500 POI, Lord Melenas at z 1324 under a hilltop at z 1421. When that height has no
+// navmesh, a random bot aims at the nearest spawn within 30 yd that has (Playerbots.RandomBotPoiSpawnHeight).
+// ponytail: any creature or object, not the quest's own, as the mobs and NPCs there stand on the POI's floor; the quest's
+// own would need its loot tables, if a wrong floor shows.
+float NewRpgBaseAction::PoiHeight(Player* bot, float x, float y)
+{
+    Map* map = bot->GetMap();
+    float const top = std::max(map->GetHeight(x, y, MAX_HEIGHT), map->GetWaterLevel(x, y));
+    if (!sConfigMgr->GetOption<bool>("Playerbots.RandomBotPoiSpawnHeight", false) ||
+        !sRandomPlayerbotMgr.IsRandomBot(bot) || bot->GetMapId() > 1 || (top > -500.0f && NavMeshAt(map, x, y, top)))
+        return top;
+
+    float height = top, best = SPAWN_CELL * SPAWN_CELL;
+    int32 const cellX = int32(std::floor(x / SPAWN_CELL)), cellY = int32(std::floor(y / SPAWN_CELL));
+    auto const& cells = SpawnCells();
+    for (int32 i = cellX - 1; i <= cellX + 1; ++i)
+    {
+        for (int32 j = cellY - 1; j <= cellY + 1; ++j)
+        {
+            auto const cell = cells.find(SpawnCellKey(bot->GetMapId(), i, j));
+            if (cell == cells.end())
+                continue;
+            for (G3D::Vector3 const& spawn : cell->second)
+            {
+                float const across = (spawn.x - x) * (spawn.x - x) + (spawn.y - y) * (spawn.y - y);
+                if (across < best && NavMeshAt(map, spawn.x, spawn.y, spawn.z))
+                {
+                    best = across;
+                    height = spawn.z;
+                }
+            }
+        }
+    }
+    return height;
 }
 
 WorldPosition NewRpgBaseAction::SelectRandomGrindPos(Player* bot)
