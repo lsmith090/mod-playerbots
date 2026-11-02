@@ -74,14 +74,14 @@ std::map<ObjectGuid, std::tuple<WorldPosition, time_t, uint32>> stuckSpots;  // 
 // agent-wow (#3159): when each bot was last moved unseen (Playerbots.RandomBotRelocate)
 std::map<ObjectGuid, time_t> relocated;  // ponytail: never pruned, as pathLogged
 // agent-wow: the quest POIs already logged as skipped (Playerbots.RandomBotPoiOnMesh)
-std::set<std::tuple<uint32, int32, int32>> poiSkipped;  // ponytail: never pruned, bounded by the POI table
+std::set<std::pair<uint32, uint32>> poiSkipped;  // quest, POI id. ponytail: never pruned, bounded by the POI table
 
 // agent-wow local patch: a quest POI's height is the top surface at its x, y, so a POI over a cave (Twisted Hatred's over
 // Lord Melenas, 97 yd down) can name a hilltop with no navmesh. The path to such a point is a straight line through
 // the hill, and from it no path comes back: 56 bots stood there on 2026-11-02. A random bot skips such a POI
 // (Playerbots.RandomBotPoiOnMesh). The box is PathGenerator's wider one, so a POI it can reach stays. Each POI skipped is
-// logged once, so the read can name them.
-bool PoiOnMesh(Player* bot, uint32 questId, float x, float y, float z)
+// logged once, by its id: x, y is a new random mix of a POI's points at each read.
+bool PoiOnMesh(Player* bot, uint32 questId, uint32 poiId, float x, float y, float z)
 {
     if (!sConfigMgr->GetOption<bool>("Playerbots.RandomBotPoiOnMesh", false) || !sRandomPlayerbotMgr.IsRandomBot(bot))
         return true;
@@ -96,9 +96,9 @@ bool PoiOnMesh(Player* bot, uint32 questId, float x, float y, float z)
     if (dtStatusSucceed(query->findNearestPoly(point, extents, &filter, &poly, nearest)) && poly)
         return true;
     std::lock_guard<std::mutex> guard(pathLock);
-    if (poiSkipped.insert({questId, int32(x), int32(y)}).second)
-        LOG_INFO("playerbots", "[quest] {} skips quest {}'s POI at {:.0f}, {:.0f}, {:.0f}: no navmesh", bot->GetName(),
-                 questId, x, y, z);
+    if (poiSkipped.insert({questId, poiId}).second)
+        LOG_INFO("playerbots", "[quest] {} skips quest {}'s POI {} at {:.0f}, {:.0f}, {:.0f}: no navmesh", bot->GetName(),
+                 questId, poiId, x, y, z);
     return false;
 }
 
@@ -1235,7 +1235,7 @@ bool NewRpgBaseAction::GetQuestPOIPosAndObjectiveIdx(uint32 questId, std::vector
             if (bot->GetZoneId() != bot->GetMap()->GetZoneId(bot->GetPhaseMask(), dx, dy, dz))
                 continue;
 
-            if (!PoiOnMesh(bot, questId, dx, dy, dz))
+            if (!PoiOnMesh(bot, questId, qPoi.Id, dx, dy, dz))
                 continue;
 
             poiInfo.push_back({{dx, dy}, qPoi.ObjectiveIndex});
@@ -1310,7 +1310,7 @@ bool NewRpgBaseAction::GetQuestPOIPosAndObjectiveIdx(uint32 questId, std::vector
         if (bot->GetZoneId() != bot->GetMap()->GetZoneId(bot->GetPhaseMask(), dx, dy, dz))
             continue;
 
-        if (!PoiOnMesh(bot, questId, dx, dy, dz))
+        if (!PoiOnMesh(bot, questId, qPoi.Id, dx, dy, dz))
             continue;
 
         poiInfo.push_back({{dx, dy}, qPoi.ObjectiveIndex});
