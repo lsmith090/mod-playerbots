@@ -27,6 +27,7 @@
 #include "GatherNodeMgr.h"
 #include "GossipDef.h"
 #include "GridTerrainData.h"
+#include "Group.h"
 #include "IVMapMgr.h"
 #include "NewRpgAuctionAction.h"
 #include "NewRpgInfo.h"
@@ -1499,6 +1500,22 @@ static float NearestPlayer(uint32 mapId, Position const& pos)
     return nearest;
 }
 
+// agent-wow local patch (Logan, 2026-11-02 11:26Z): the relocate's "ungrouped" protects a bot grouped with a pilot, so a
+// group of random bots alone doesn't hold a stranded or stuck bot back (Playerbots.RandomBotRelocateGroup). A member
+// that isn't a random bot, online or not, keeps the whole group out.
+static bool RelocateGroupAllows(Player* bot)
+{
+    Group const* group = bot->GetGroup();
+    if (!group)
+        return true;
+    if (!sConfigMgr->GetOption<bool>("Playerbots.RandomBotRelocateGroup", false))
+        return false;
+    for (Group::MemberSlot const& member : group->GetMemberSlots())
+        if (!sRandomPlayerbotMgr.IsRandomBot(member.guid.GetCounter()))
+            return false;
+    return true;
+}
+
 // agent-wow local patch (Logan's ruling, 2026-10-29 18:56Z, #3159): an unseen move for a stranded or stuck random bot,
 // which narrows the 10-13 no-teleport ruling. Stranded: its level is 3 or more below where its zone's band starts,
 // outside a starting zone (their bands start at 5). Stuck: patch 52 gave up 3 times within 200 yd in an hour, so the
@@ -1510,7 +1527,7 @@ bool NewRpgBaseAction::RelocateStranded()
 {
     uint32 const hours = sPlayerbotAIConfig.RandomBotRelocate;
     // a bot holding an invite it hasn't answered is never moved (the ruling: never on an invite)
-    if (!hours || !sRandomPlayerbotMgr.IsRandomBot(bot) || bot->GetGroup() || bot->GetGroupInvite() || bot->IsInCombat() ||
+    if (!hours || !sRandomPlayerbotMgr.IsRandomBot(bot) || !RelocateGroupAllows(bot) || bot->GetGroupInvite() || bot->IsInCombat() ||
         !bot->IsAlive() ||
         bot->GetTransport() || bot->IsInFlight())
         return false;
@@ -1571,6 +1588,12 @@ bool NewRpgBaseAction::RelocateStranded()
              stranded ? "stranded" : "stuck",
              nearest == FLT_MAX ? std::string("no player on either map")
                                 : fmt::format("{:.0f} yd from nearest player", nearest));
+    // the bot leaves alone; the next leader's give-ups or level free the others in turn
+    if (bot->GetGroup())
+    {
+        LOG_INFO("playerbots", "[group] {} leaves its group: {}", bot->GetName(), stranded ? "stranded" : "stuck");
+        botAI->LeaveOrDisbandGroup();
+    }
     // as patch 52's stuck teleport did from this action before it (no botAI->Reset inside an action's Execute)
     bot->GetMotionMaster()->Clear();
     bot->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED | AURA_INTERRUPT_FLAG_CHANGE_MAP);
