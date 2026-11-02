@@ -27,7 +27,7 @@
 #include "GatherNodeMgr.h"
 #include "GossipDef.h"
 #include "GridTerrainData.h"
-#include "Group.h"
+#include "GroupChat.h"
 #include "IVMapMgr.h"
 #include "NewRpgAuctionAction.h"
 #include "NewRpgInfo.h"
@@ -1530,15 +1530,9 @@ static float NearestPlayer(uint32 mapId, Position const& pos)
 // that isn't a random bot, online or not, keeps the whole group out.
 static bool RelocateGroupAllows(Player* bot)
 {
-    Group const* group = bot->GetGroup();
-    if (!group)
-        return true;
-    if (!sConfigMgr->GetOption<bool>("Playerbots.RandomBotRelocateGroup", false))
-        return false;
-    for (Group::MemberSlot const& member : group->GetMemberSlots())
-        if (!sRandomPlayerbotMgr.IsRandomBot(member.guid.GetCounter()))
-            return false;
-    return true;
+    Group* group = bot->GetGroup();
+    return !group || (sConfigMgr->GetOption<bool>("Playerbots.RandomBotRelocateGroup", false) &&
+                      GroupChat::AllRandomBots(group));
 }
 
 // agent-wow local patch (Logan's ruling, 2026-10-29 18:56Z, #3159): an unseen move for a stranded or stuck random bot,
