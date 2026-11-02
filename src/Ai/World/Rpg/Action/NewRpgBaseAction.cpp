@@ -73,6 +73,25 @@ std::map<ObjectGuid, std::tuple<WorldPosition, time_t, uint32>> stuckSpots;  // 
 // agent-wow (#3159): when each bot was last moved unseen (Playerbots.RandomBotRelocate)
 std::map<ObjectGuid, time_t> relocated;  // ponytail: never pruned, as pathLogged
 
+// agent-wow local patch: a quest POI's height is the top surface at its x, y, so a POI over a cave (Twisted Hatred's over
+// Lord Melenas, 97 yd down) can name a hilltop with no navmesh. The path to such a point is a straight line through
+// the hill, and from it no path comes back: 56 bots stood there on 2026-11-02. A random bot skips such a POI
+// (Playerbots.RandomBotPoiOnMesh). The box is the one PathGenerator first searches.
+bool PoiOnMesh(Player* bot, float x, float y, float z)
+{
+    if (!sConfigMgr->GetOption<bool>("Playerbots.RandomBotPoiOnMesh", false) || !sRandomPlayerbotMgr.IsRandomBot(bot))
+        return true;
+    dtNavMeshQuery const* query = bot->GetMap()->GetMapCollisionData().GetMMapData().GetNavMeshQuery();
+    if (!query)
+        return true;
+    float const point[3] = {y, z, x};
+    float const extents[3] = {3.0f, 5.0f, 3.0f};
+    float nearest[3];
+    dtQueryFilter const filter;
+    dtPolyRef poly = 0;
+    return dtStatusSucceed(query->findNearestPoly(point, extents, &filter, &poly, nearest)) && poly;
+}
+
 // agent-wow: the first mob that would aggro the bot on a walk through these points (Playerbots.RandomBotPathDanger).
 // The walk is sampled every 8 yd for its first 120 yd: farther than that the bot sees nothing. A bot that already
 // stands where a mob would aggro it is left to the flee.
@@ -1206,6 +1225,9 @@ bool NewRpgBaseAction::GetQuestPOIPosAndObjectiveIdx(uint32 questId, std::vector
             if (bot->GetZoneId() != bot->GetMap()->GetZoneId(bot->GetPhaseMask(), dx, dy, dz))
                 continue;
 
+            if (!PoiOnMesh(bot, dx, dy, dz))
+                continue;
+
             poiInfo.push_back({{dx, dy}, qPoi.ObjectiveIndex});
         }
 
@@ -1276,6 +1298,9 @@ bool NewRpgBaseAction::GetQuestPOIPosAndObjectiveIdx(uint32 questId, std::vector
             continue;
 
         if (bot->GetZoneId() != bot->GetMap()->GetZoneId(bot->GetPhaseMask(), dx, dy, dz))
+            continue;
+
+        if (!PoiOnMesh(bot, dx, dy, dz))
             continue;
 
         poiInfo.push_back({{dx, dy}, qPoi.ObjectiveIndex});
