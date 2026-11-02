@@ -82,8 +82,8 @@ bool HostileFaction(Player* bot, uint32 creatureEntry)
     return !theirs || !ours || ours->IsHostileTo(*theirs) || theirs->IsHostileTo(*ours);
 }
 
-// the nearest friendly spawn on the bot's map within MAX_WALK, or nullptr
-Spawn const* Nearest(Player* bot, std::vector<Spawn> const& spawns, float& nearestDist)
+// the nearest friendly spawn on the bot's map within reach, or nullptr
+Spawn const* Nearest(Player* bot, std::vector<Spawn> const& spawns, float& nearestDist, float reach = MAX_WALK)
 {
     Spawn const* nearest = nullptr;
     for (Spawn const& spawn : spawns)
@@ -92,7 +92,7 @@ Spawn const* Nearest(Player* bot, std::vector<Spawn> const& spawns, float& neare
             continue;
 
         float const dist = bot->GetExactDist(spawn.x, spawn.y, spawn.z);
-        if (dist > MAX_WALK || (nearest && dist >= nearestDist) || HostileFaction(bot, spawn.entry))
+        if (dist > reach || (nearest && dist >= nearestDist) || HostileFaction(bot, spawn.entry))
             continue;
 
         nearest = &spawn;
@@ -173,14 +173,57 @@ uint32 Goods(PlayerbotAI* botAI)
     return goods;
 }
 
+// The auctions of an item the bot may bid out, any seller but itself and its own account: the core refuses those bids
+// (HandleAuctionPlaceBid)
+std::vector<AuctionEntry const*> Offers(Player* bot, AuctionHouseObject* house, uint32 item)
+{
+    uint32 const account = bot->GetSession()->GetAccountId();
+    std::vector<AuctionEntry const*> offers;
+    for (auto const& [id, auction] : house->GetAuctions())
+        if (auction && auction->item_template == item && auction->buyout && auction->itemCount &&
+            auction->owner != bot->GetGUID() && sCharacterCache->GetCharacterAccountIdByGuid(auction->owner) != account)
+            offers.push_back(auction);
+    return offers;
+}
+
+// agent-wow (#87, the 11-02 read): a bot's free tradeskill money covers the cheapest stack of a wanted reagent on sale in
+// this town's house, the same test AhBuyReagentsAction bids by. Most bots stop at the first line (230 of 257 shops found
+// 0 copper free). A walk over the house per want, only from Start, so at most once per bot per cooldown.
+bool CanPayForOne(PlayerbotAI* botAI, std::vector<Want> const& wants, uint32 auctioneerEntry, uint32 money)
+{
+    if (!money)
+        return false;
+
+    CreatureTemplate const* creature = sObjectMgr->GetCreatureTemplate(auctioneerEntry);
+    AuctionHouseObject* house = creature ? sAuctionMgr->GetAuctionsMap(creature->faction) : nullptr;
+    if (!house)
+        return false;
+
+    Player* bot = botAI->GetBot();
+    return std::any_of(wants.begin(), wants.end(), [&](Want const& want)
+    {
+        std::vector<AuctionEntry const*> const offers = Offers(bot, house, want.item);
+        return std::any_of(offers.begin(), offers.end(), [money](AuctionEntry const* auction) { return auction->buyout <= money; });
+    });
+}
+
 bool HasCrafting(Player* bot)
 {
     return std::any_of(std::begin(CRAFTING), std::end(CRAFTING), [bot](uint16 skill) { return bot->HasSkill(skill); });
 }
 
+// agent-wow (#87, the 11-02 read): NEXT_SESSION and SESSION_END, which must read 0 until set. "last said" starts at two
+// minutes ago, which read as a session that had run out: every bot was Active from its login until its first Stay ended
+// that session, 1,934 of 3,287 `ends` lines had no start, and the first cooldown was never drawn. "last spell cast time"
+// is the same manual value starting at 0, and its other qualifiers are spell names (no new header for a timestamp).
+Value<time_t>* Clock(PlayerbotAI* botAI, char const* name)
+{
+    return botAI->GetAiObjectContext()->GetValue<time_t>("last spell cast time", name);
+}
+
 void End(PlayerbotAI* botAI, char const* why)
 {
-    botAI->GetAiObjectContext()->GetValue<time_t>("last said", BotTrade::SESSION_END)->Set(0);
+    Clock(botAI, BotTrade::SESSION_END)->Set(0);
     LOG_INFO("playerbots", "[trade] {} ends its session: {}", botAI->GetBot()->GetName(), why);
 }
 
@@ -277,7 +320,7 @@ bool Enabled(PlayerbotAI* botAI)
 
 bool Active(PlayerbotAI* botAI)
 {
-    return Enabled(botAI) && botAI->GetAiObjectContext()->GetValue<time_t>("last said", SESSION_END)->Get() != 0;
+    return Enabled(botAI) && Clock(botAI, SESSION_END)->Get() > time(nullptr);
 }
 
 bool Due(PlayerbotAI* botAI)
@@ -285,7 +328,7 @@ bool Due(PlayerbotAI* botAI)
     if (!Enabled(botAI) || Active(botAI) || botAI->GetBot()->GetGroup() || botAI->GetBot()->IsInCombat())
         return false;
 
-    auto next = botAI->GetAiObjectContext()->GetValue<time_t>("last said", NEXT_SESSION);
+    auto next = Clock(botAI, NEXT_SESSION);
     time_t const now = time(nullptr);
     if (!next->Get())
     {
@@ -301,28 +344,56 @@ bool Start(PlayerbotAI* botAI)
     AiObjectContext* context = botAI->GetAiObjectContext();
     time_t const now = time(nullptr);
 
+    // whatever it finds, the next look is a cooldown away
+    Clock(botAI, NEXT_SESSION)->Set(now + COOLDOWN);
+
     bool const crafter = HasCrafting(bot);
     std::vector<Want> const wants = crafter ? ShoppingList(bot) : std::vector<Want>();
     bool const craftable = crafter && EarnedProfessions::CanCraftNow(botAI);
     uint32 const goods = Goods(botAI);
+    bool const listable = goods >= BotAuction::MIN_PIECES;
+    if (wants.empty() && !craftable && !listable)
+        return false;
 
+    // agent-wow (#87, the 11-02 read): 150 of 1,574 sessions ended in a death, 149 of those on walks past 500 yd and 125 at
+    // level 5 or under. Read at each look, so `.reload config` changes them.
+    uint32 const minLevel = sConfigMgr->GetOption<uint32>("Playerbots.RandomBotTradeSessionMinLevel", 0);
+    if (bot->GetLevel() < minLevel)
+    {
+        LOG_INFO("playerbots", "[trade] {} stays out of town: level {}, under {}", bot->GetName(), bot->GetLevel(), minLevel);
+        return false;
+    }
+
+    float const reach = std::min(MAX_WALK, sConfigMgr->GetOption<float>("Playerbots.RandomBotTradeSessionMaxWalk", MAX_WALK));
     float dist = 0.0f;
-    Spawn const* town = (wants.empty() && !craftable && goods < BotAuction::MIN_PIECES)
-                            ? nullptr
-                            : Nearest(bot, AuctioneerSpawns(), dist);
+    Spawn const* town = Nearest(bot, AuctioneerSpawns(), dist, reach);
+
+    // a trip only to buy needs money to buy with: 59% of starts were these, and they could pay for nothing
+    if (town && !craftable && !listable && sConfigMgr->GetOption<bool>("Playerbots.RandomBotTradeSessionMustPay", false))
+    {
+        uint32 const money = context->GetValue<uint32>("free money for", uint32(NeedMoneyFor::tradeskill))->Get();
+        if (!CanPayForOne(botAI, wants, town->entry, money))
+        {
+            LOG_INFO("playerbots", "[trade] {} stays out of town: {} copper free pays for none of its {} reagents",
+                     bot->GetName(), money, wants.size());
+            return false;
+        }
+    }
+
     bool inn = false;
     if (!town && craftable)
     {
-        town = Nearest(bot, InnkeeperSpawns(), dist);  // crafting only
+        town = Nearest(bot, InnkeeperSpawns(), dist, reach);  // crafting only
         inn = true;
     }
 
-    // nothing to do, or nowhere to do it: the next look is a cooldown away
-    context->GetValue<time_t>("last said", NEXT_SESSION)->Set(now + COOLDOWN);
     if (!town)
+    {
+        LOG_INFO("playerbots", "[trade] {} stays out of town: none within {:.0f} yd", bot->GetName(), reach);
         return false;
+    }
 
-    context->GetValue<time_t>("last said", SESSION_END)->Set(now + SESSION);
+    Clock(botAI, SESSION_END)->Set(now + SESSION);
     // an inn town has no auctioneer to visit: the visit counts as made
     context->GetValue<time_t>("last said", SHOPPED)->Set(inn ? now : 0);
     botAI->rpgInfo.ChangeToGoCamp(WorldPosition(town->mapId, town->x, town->y, town->z));
@@ -334,13 +405,21 @@ bool Start(PlayerbotAI* botAI)
 
 bool Stay(PlayerbotAI* botAI)
 {
-    if (!Active(botAI))
+    // SESSION_END itself, not Active: a session past its time isn't Active but still owes its `ends` line
+    time_t const sessionEnd = Clock(botAI, SESSION_END)->Get();
+    if (!sessionEnd)
         return false;
+
+    if (!Enabled(botAI))
+    {
+        End(botAI, "sessions are off for it");
+        return false;
+    }
 
     Player* bot = botAI->GetBot();
     AiObjectContext* context = botAI->GetAiObjectContext();
     time_t const now = time(nullptr);
-    if (now >= context->GetValue<time_t>("last said", SESSION_END)->Get())
+    if (now >= sessionEnd)
     {
         End(botAI, "its 15 minutes are up");
         return false;
@@ -401,17 +480,10 @@ bool AhBuyReagentsAction::Execute(Event /*event*/)
     // its own money (upstream's "free money for" tradeskill), less each bid queued this visit: the money moves only when
     // the world thread runs the bid. No price ceiling (Logan, 10-22 12:42Z).
     uint32 budget = AI_VALUE2(uint32, "free money for", uint32(NeedMoneyFor::tradeskill));
-    uint32 const account = bot->GetSession()->GetAccountId();
     uint32 bids = 0, spent = 0;
     for (Want const& want : ShoppingList(bot))
     {
-        // the core refuses a bid on one's own auction or one from the same account (HandleAuctionPlaceBid)
-        std::vector<AuctionEntry const*> offers;
-        for (auto const& [id, auction] : house->GetAuctions())
-            if (auction && auction->item_template == want.item && auction->buyout && auction->itemCount &&
-                auction->owner != bot->GetGUID() && sCharacterCache->GetCharacterAccountIdByGuid(auction->owner) != account)
-                offers.push_back(auction);
-
+        std::vector<AuctionEntry const*> offers = Offers(bot, house, want.item);
         std::sort(offers.begin(), offers.end(), [](AuctionEntry const* a, AuctionEntry const* b)
                   { return uint64(a->buyout) * b->itemCount < uint64(b->buyout) * a->itemCount; });
 

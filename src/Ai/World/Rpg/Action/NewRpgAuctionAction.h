@@ -42,11 +42,13 @@ uint32 Pieces(Player* bot);
 // to craft, goods to list) goes to the nearest town with an auction house on its map (patch 26's search, 3,000 yd),
 // else the nearest inn town for crafting only, and stays there up to 15 minutes: patch 2 lists, it bids out reagents,
 // the earned trainer trains, it crafts, patch 26 takes its auction mail. Drawn at weight 20 (WanderNpc's) among the
-// statuses, at most every 2 hours. Off unless Playerbots.RandomBotTradeSession (read once, PlayerbotAIConfig).
+// statuses, at most every 2 hours. Off unless Playerbots.RandomBotTradeSession (read once, PlayerbotAIConfig). A session
+// starts only from RandomBotTradeSessionMinLevel, within RandomBotTradeSessionMaxWalk yd, and with
+// RandomBotTradeSessionMustPay a trip only to buy needs money for one reagent on sale (#87, the 11-02 read).
 namespace BotTrade
 {
-// "last said" values (no new header for a timestamp): when the next session may start, when this one ends (0 when none
-// runs), and when this session's auction house visit was made
+// Timestamps (no new header for them): when the next session may start and when this one ends (0 when none runs), both
+// starting at 0, and, as a "last said" value, when this session's auction house visit was made
 inline constexpr char const* NEXT_SESSION = "trade next session";
 inline constexpr char const* SESSION_END = "trade session end";
 inline constexpr char const* SHOPPED = "trade session shopped";
