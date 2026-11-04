@@ -706,6 +706,11 @@ Playerbots.BotTaxiGapMs = 200
 # Extra small randomness added to each gap so launches don’t look robotic (ms)
 Playerbots.BotTaxiGapJitterMs = 100
 
+# agent-wow local patch (#3682): a bot flies with its master only if the master's flight was accepted, and the relay
+# leaves a bot on stay or away from its master alone, without a word.
+# Default: 0 (upstream: every bot in the group is sent as soon as the master asks)
+Playerbots.BotTaxiRelayChecks = 0
+
 #
 #
 ####################################################################################################

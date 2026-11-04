@@ -14,6 +14,17 @@
 
 bool TaxiAction::Execute(Event event)
 {
+    // agent-wow local patch (Playerbots.BotTaxiRelayChecks, #3682): the master's flight packet reaches a bot before the
+    // server answers it. A bot on stay or away from its master isn't flying with them, so it does nothing and says nothing.
+    bool const relayChecks = sConfigMgr->GetOption<bool>("Playerbots.BotTaxiRelayChecks", false);
+    bool const relayed = relayChecks && !event.getPacket().empty() &&
+                         (event.getPacket().GetOpcode() == CMSG_ACTIVATETAXI ||
+                          event.getPacket().GetOpcode() == CMSG_ACTIVATETAXIEXPRESS);
+    Player* master = botAI->GetMaster();
+    if (relayed && (!master || botAI->HasStrategy("stay", BOT_STATE_NON_COMBAT) ||
+                    !bot->IsWithinDistInMap(master, sPlayerbotAIConfig.SightDistance)))
+        return false;
+
     botAI->RemoveShapeshift();
 
     LastMovement& movement = context->GetValue<LastMovement&>("last taxi")->Get();
@@ -71,11 +82,25 @@ bool TaxiAction::Execute(Event event)
 
             // Store the NPC's GUID so we can re-acquire the pointer later
             ObjectGuid npcGuid = npc->GetGUID();
+            ObjectGuid masterGuid = master ? master->GetGUID() : ObjectGuid::Empty;
 
             // schedule the take-off
             botAI->AddTimedEvent(
-                [bot = bot, &movement, npcGuid]() -> void
+                [bot = bot, &movement, npcGuid, masterGuid, relayChecks]() -> void
                 {
+                    // agent-wow local patch (#3682): the server has answered by now. A master who isn't in the air
+                    // was refused, and the route is forgotten so a later order can't fly it either.
+                    if (relayChecks)
+                    {
+                        Player* masterNow = ObjectAccessor::GetPlayer(*bot, masterGuid);
+                        if (!masterNow || !masterNow->IsInFlight())
+                        {
+                            movement.taxiNodes.clear();
+                            movement.Set(nullptr);
+                            return;
+                        }
+                    }
+
                     if (Creature* npcPtr = ObjectAccessor::GetCreature(*bot, npcGuid))
                         if (!movement.taxiNodes.empty())
                             bot->ActivateTaxiPathTo(movement.taxiNodes, npcPtr, 0);
@@ -131,7 +156,8 @@ bool TaxiAction::Execute(Event event)
         return true;
     }
 
-    botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-        "taxi_no_flightmaster_nearby", "Cannot find any flightmaster to talk", {}));
+    if (!relayed)  // agent-wow local patch (#3682): this line answers an order, never the master's own flight
+        botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault(
+            "taxi_no_flightmaster_nearby", "Cannot find any flightmaster to talk", {}));
     return false;
 }
